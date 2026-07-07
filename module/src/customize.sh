@@ -251,14 +251,70 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
   ui_print " 配置已保存，可在 WebUI > 元模块挂载 中修改"
   ui_print "*********************************************************"
 
+  # INFO: Auto-detect which modules need mounting. Scan /data/adb/modules/*
+  # for modules that have a system/ directory and aren't disabled/removal
+  # flagged. This auto-populates include_modules so the user doesn't have to
+  # manually toggle every module in the WebUI after install.
+  #
+  # Also auto-populate allow_partitions from the partitions those modules
+  # reference under system/ (e.g. system, vendor). This is convenient but
+  # DANGEROUS: mounting system/vendor at post-fs-data can bootloop. We still
+  # do it because if the user enabled metamount, they presumably want their
+  # modules mounted — and a module that ships system/ files clearly expects
+  # that partition to be overlaid. The user can disable specific partitions
+  # in the WebUI afterwards.
+  META_INCLUDE_MODULES=""
+  META_ALLOW_PARTITIONS=""
+  if [ "$META_ENABLED" = "true" ]; then
+    ui_print ""
+    ui_print " 自动识别需要挂载的模块..."
+    for _mod in /data/adb/modules/*; do
+      [ -d "$_mod" ] || continue
+      [ -d "$_mod/system" ] || continue
+      [ -f "$_mod/disable" ] && continue
+      [ -f "$_mod/remove" ] && continue
+      _modid=$(basename "$_mod")
+      # Don't mount ourselves
+      [ "$_modid" = "rezygisk" ] && continue
+      META_INCLUDE_MODULES="$META_INCLUDE_MODULES $_modid"
+      # Collect partitions this module references
+      for _entry in "$_mod"/system/*; do
+        [ -e "$_entry" ] || continue
+        _pname=$(basename "$_entry")
+        case "$_pname" in
+          ""|*..*|*/*) continue;;
+        esac
+        case " $META_ALLOW_PARTITIONS " in
+          *" $_pname "*) ;;
+          *) META_ALLOW_PARTITIONS="$META_ALLOW_PARTITIONS $_pname";;
+        esac
+      done
+    done
+    # Trim leading spaces
+    META_INCLUDE_MODULES=$(echo $META_INCLUDE_MODULES)
+    META_ALLOW_PARTITIONS=$(echo $META_ALLOW_PARTITIONS)
+    if [ -n "$META_INCLUDE_MODULES" ]; then
+      ui_print "  识别到 $(echo $META_INCLUDE_MODULES | wc -w) 个模块:"
+      for _m in $META_INCLUDE_MODULES; do
+        ui_print "    - $_m"
+      done
+      ui_print "  涉及分区: $META_ALLOW_PARTITIONS"
+      ui_print "  (可在 WebUI 中调整)"
+    else
+      ui_print "  未发现需要挂载的模块"
+    fi
+    ui_print ""
+  fi
+
   # INFO: Persist the configuration so metamount.sh can source it on next boot.
+  # include_modules and allow_partitions are auto-populated above.
   mkdir -p /data/adb/rezygisk
   cat > /data/adb/rezygisk/.rz_meta_cfg <<METACFG
 enabled=$META_ENABLED
 mount_mode=$META_MOUNT_MODE
 fake_mount_name=$META_FAKE_NAME
-allow_partitions=""
-include_modules=""
+allow_partitions="$META_ALLOW_PARTITIONS"
+include_modules="$META_INCLUDE_MODULES"
 METACFG
 fi
 

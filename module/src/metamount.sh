@@ -196,8 +196,54 @@ _try_setup_tmpfs() {
   return 1
 }
 
+# INFO: Create (or recreate) an ext4 sparse image at $img with size
+# $EXT4_IMG_SIZE_MB. Uses JOURNAL-LESS ext4 (no has_journal feature) because
+# the overlay upperdir data is fully recreatable from the modules' system/
+# dirs on every boot — there is nothing precious to journal. Removing the
+# journal eliminates ALL journal write traffic → maximum flash-wear reduction.
+# This is the single biggest wear improvement available for a recreatable fs.
+#
+# If the journal-less format is rejected by an older mke2fs, falls back to a
+# journaled ext4 with a tiny journal.
+_ext4_create_image() {
+  local img="$1"
+  # Create sparse file: bs=1 count=0 seek=N grows it logically without
+  # writing any data blocks (equivalent to `truncate -s`).
+  if ! dd if=/dev/null of="$img" bs=1M count=0 seek="$EXT4_IMG_SIZE_MB" 2>/dev/null; then
+    return 1
+  fi
+  # INFO: Try journal-less ext4 first (best wear profile). -O ^has_journal
+  # disables the journal feature. Combined with the other optimizations:
+  #   sparse_super   fewer superblock backups → less metadata writes
+  #   uninit_bg      uninitialized block groups → no zeroing needed
+  #   extent         extent-based blocks → better locality, less fragmentation
+  #   dir_index      htree directory indexing → faster lookups
+  #   -b 4096        4K block size (matches typical flash page size)
+  #   -T largefile   fewer inodes (modules have few large files)
+  #   -m 0           no reserved blocks (this is not a root fs)
+  #   -E lazy_itable_init  lazy inode table init → less upfront writes
+  if "$mke2fs_bin" -t ext4 -F -b 4096 -T largefile -m 0 \
+    -O sparse_super,uninit_bg,extent,dir_index,large_file,huge_file,dir_nlink,extra_isize,^has_journal \
+    -E lazy_itable_init \
+    "$img" >/dev/null 2>&1; then
+    _meta_log "ext4: created journal-less image"
+    return 0
+  fi
+  # Fallback: older mke2fs may not support ^has_journal via -O. Use a tiny
+  # journal + lazy_journal_init to minimize journal write traffic instead.
+  _meta_log "ext4: journal-less create failed, falling back to tiny-journal"
+  if "$mke2fs_bin" -t ext4 -F -b 4096 -T largefile -m 0 -J size=4 \
+    -O sparse_super,uninit_bg,extent,dir_index,large_file,huge_file,dir_nlink,extra_isize \
+    -E lazy_itable_init,lazy_journal_init \
+    "$img" >/dev/null 2>&1; then
+    return 0
+  fi
+  rm -f "$img" 2>/dev/null
+  return 1
+}
+
 _try_setup_ext4() {
-  local img mnt mke2fs_bin resize2fs_bin
+  local img mnt mke2fs_bin resize2fs_bin e2fsck_bin
   img="$RW_BASE/$FAKE_MOUNT_NAME.img"
   mnt="/mnt/vendor/$FAKE_MOUNT_NAME"
 
@@ -217,94 +263,66 @@ _try_setup_ext4() {
     [ -x "$p" ] && resize2fs_bin="$p" && break
   done
 
+  e2fsck_bin=""
+  for p in /system/bin/e2fsck /system/xbin/e2fsck /data/adb/ksu/bin/e2fsck /data/adb/ap/bin/e2fsck; do
+    [ -x "$p" ] && e2fsck_bin="$p" && break
+  done
+
   mkdir -p "$RW_BASE" 2>/dev/null
   mkdir -p "$mnt" 2>/dev/null || return 1
 
-  # INFO: Create a SPARSE image instead of writing 256MB of zeros.
-  # `dd seek=` creates a sparse file: the filesystem reports the logical
-  # size but allocates blocks lazily as they are written. This avoids writing
-  # 256MB of zeros upfront → far less flash wear, and faster creation.
   if [ ! -f "$img" ]; then
-    _meta_log "ext4: creating sparse image $img (${EXT4_IMG_SIZE_MB}MB)"
-    # Create sparse file: bs=1 count=0 seek=N grows it logically without
-    # writing any data blocks. Equivalent to `truncate -s` but more portable.
-    if ! dd if=/dev/null of="$img" bs=1M count=0 seek="$EXT4_IMG_SIZE_MB" 2>/dev/null; then
-      _meta_log "ext4: sparse dd failed"
-      return 1
-    fi
-    # INFO: Format with ext4 optimizations to reduce write amplification:
-    #   -O sparse_super      fewer superblock backups → less metadata writes
-    #   -O uninit_bg         uninitialized block groups → no zeroing needed
-    #   -O extent            extent-based blocks → better locality, less fragmentation
-    #   -O dir_index         htree directory indexing → faster lookups
-    #   -O large_file        support large files
-    #   -O huge_file         allow very large files
-    #   -O dir_nlink         unlimited subdirectory links
-    #   -O extra_isize       larger inodes for future features
-    #   -E lazy_itable_init  lazy inode table init → less upfront writes
-    #   -E lazy_journal_init lazy journal init → less upfront writes
-    #   -b 4096              4K block size (matches typical flash page size)
-    #   -T largefile         fewer inodes (modules have few large files)
-    #   -m 0                 no reserved blocks (this is not a root fs)
-    #   -J size=8            8MB journal (balance: small enough to reduce
-    #                        metadata writes, large enough to batch commits)
-    if ! "$mke2fs_bin" -t ext4 -F -b 4096 -T largefile -m 0 -J size=8 \
-      -O sparse_super,uninit_bg,extent,dir_index,large_file,huge_file,dir_nlink,extra_isize \
-      -E lazy_itable_init,lazy_journal_init \
-      "$img" >/dev/null 2>&1; then
-      _meta_log "ext4: mke2fs failed"
-      rm -f "$img" 2>/dev/null
+    # INFO: Create a SPARSE, JOURNAL-LESS image. Sparse = no 256MB zero write
+    # upfront. Journal-less = no journal write traffic at all (data is
+    # recreatable from modules on every boot). Together these give the
+    # minimum possible flash wear for an ext4 staging area.
+    _meta_log "ext4: creating sparse journal-less image $img (${EXT4_IMG_SIZE_MB}MB)"
+    if ! _ext4_create_image "$img"; then
+      _meta_log "ext4: image creation failed"
       return 1
     fi
   else
-    # INFO: Image already exists. If EXT4_IMG_SIZE_MB changed (e.g. config
-    # update), grow the sparse file + resize the fs to use the new space.
-    # resize2fs on a mounted fs is possible but we do it before mount here
-    # for safety. Shrinking is intentionally NOT done (risky, unnecessary).
+    # INFO: Image exists. Auto-grow if size config increased.
     if [ -n "$resize2fs_bin" ]; then
       _want_bytes=$((EXT4_IMG_SIZE_MB * 1024 * 1024))
       _cur_bytes=$(stat -c %s "$img" 2>/dev/null || echo 0)
       if [ "${_cur_bytes:-0}" -gt 0 ] && [ "$_want_bytes" -gt "$_cur_bytes" ]; then
         _meta_log "ext4: growing image ${_cur_bytes} → ${_want_bytes} bytes"
-        # Grow the sparse file (no actual data written for the gap)
         dd if=/dev/null of="$img" bs=1M count=0 seek="$EXT4_IMG_SIZE_MB" 2>/dev/null
-        # Resize the ext4 fs to fill the new size
         "$resize2fs_bin" "$img" >/dev/null 2>&1 || _meta_log "ext4: resize2fs failed (continuing with old size)"
       fi
     fi
+    # INFO: Run e2fsck to auto-repair any corruption from a previous bad
+    # shutdown BEFORE attempting mount. -y = auto-yes to all repairs,
+    # -f = force check even if clean. This preserves existing module data
+    # instead of blindly recreating the image.
+    if [ -n "$e2fsck_bin" ]; then
+      "$e2fsck_bin" -y -f "$img" >/dev/null 2>&1 || _meta_log "ext4: e2fsck reported errors (auto-repaired if possible)"
+    fi
   fi
 
-  # INFO: Mount with performance + wear-reduction options. These are the key
-  # levers for reducing flash write amplification on a loop-mounted ext4:
+  # INFO: Mount with maximum wear-reduction options. Since the staging fs is
+  # journal-less (when supported) or has a tiny journal, the main write
+  # sources are: data writes (unavoidable), atime updates, and barriers.
   #   noatime      don't update access times → eliminates a write per read
-  #   nodiratime   don't update dir access times (subset of noatime, explicit)
+  #   nodiratime   don't update dir access times (subset of noatime)
   #   delalloc     delay block allocation → better layout, less fragmentation
-  #   commit=60    flush journal every 60s instead of 5s default → far fewer
-  #                periodic write bursts
-  #   nobarrier    disable write barriers (safe here: overlay upperdir data is
-  #                recreatable from modules on next boot; barriers cost extra
-  #                FLUSH CACHE commands that add wear and latency)
-  #   init_itable=0  defer inode table initialization as long as possible
-  #   discard=off  (nodiscard) on a loop device, discard passes TRIM down to
-  #                the backing file on /data, which causes extra writes on the
-  #                underlying flash → explicitly disabled to reduce wear
+  #   commit=600   flush every 600s (10 min) — with journal-less or tiny
+  #                journal, this barely matters; large value minimizes syncs
+  #   nobarrier    disable write barriers (data is recreatable; barriers add
+  #                FLUSH CACHE commands that cost wear + latency)
+  #   init_itable=0  defer inode table initialization maximally
+  #   nodiscard    on a loop device, discard passes TRIM to the backing /data
+  #                file → extra underlying flash writes; disabled to reduce wear
   #   errors=continue  don't remount-ro on error (keep system booting)
-  if ! mount -t ext4 -o loop,noatime,nodiratime,delalloc,commit=60,nobarrier,init_itable=0,nodiscard,errors=continue "$img" "$mnt" 2>/dev/null; then
-    # Fallback 1: some kernels reject nobarrier/nodiscard/init_itable
-    _meta_log "ext4: full-optimized mount failed, retrying without advanced opts"
+  if ! mount -t ext4 -o loop,noatime,nodiratime,delalloc,commit=600,nobarrier,init_itable=0,nodiscard,errors=continue "$img" "$mnt" 2>/dev/null; then
+    # Fallback 1: some kernels reject nobarrier/nodiscard/init_itable/commit=600
+    _meta_log "ext4: full-optimized mount failed, retrying with fewer opts"
     if ! mount -t ext4 -o loop,noatime,delalloc,errors=continue "$img" "$mnt" 2>/dev/null; then
-      # Fallback 2: image may be corrupt from a previous bad shutdown. Recreate.
-      _meta_log "ext4: mount failed, recreating possibly-corrupt image"
+      # Fallback 2: image is unrecoverably corrupt. Recreate from scratch.
+      _meta_log "ext4: mount failed after e2fsck, recreating corrupt image"
       rm -f "$img" 2>/dev/null
-      if ! dd if=/dev/null of="$img" bs=1M count=0 seek="$EXT4_IMG_SIZE_MB" 2>/dev/null; then
-        return 1
-      fi
-      if ! "$mke2fs_bin" -t ext4 -F -b 4096 -T largefile -m 0 -J size=8 \
-        -O sparse_super,uninit_bg,extent,dir_index,large_file,huge_file,dir_nlink,extra_isize \
-        -E lazy_itable_init,lazy_journal_init \
-        "$img" >/dev/null 2>&1; then
-        _meta_log "ext4: mke2fs (recreate) failed"
-        rm -f "$img" 2>/dev/null
+      if ! _ext4_create_image "$img"; then
         return 1
       fi
       if ! mount -t ext4 -o loop,noatime,delalloc,errors=continue "$img" "$mnt" 2>/dev/null; then
