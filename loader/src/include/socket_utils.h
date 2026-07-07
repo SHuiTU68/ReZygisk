@@ -5,6 +5,14 @@
 
 #include <sys/types.h>
 
+/* INFO: Maximum allowed length for a string received via socket.
+ * Prevents integer overflow (str_len + 1) on 32-bit and DoS via huge alloc. */
+#define MAX_STRING_LEN (1024 * 1024)
+
+/* INFO: Maximum allowed number of modules to prevent integer overflow on
+ * malloc (count * sizeof(char *)) and DoS via huge count. */
+#define MAX_MODULES_COUNT 4096
+
 ssize_t write_loop(int fd, const void *buf, size_t count);
 
 ssize_t read_loop_offset(int fd, void *buf, size_t len, off_t off);

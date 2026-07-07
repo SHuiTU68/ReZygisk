@@ -214,6 +214,13 @@ char *read_string(int fd) {
     return NULL;
   }
 
+  /* INFO: Sanity check to prevent integer overflow and DoS */
+  if (str_len > MAX_STRING_LEN) {
+    LOGE("String length too large: %zu (max %d)\n", str_len, MAX_STRING_LEN);
+
+    return NULL;
+  }
+
   char *buf = malloc(str_len + 1);
   if (buf == NULL) {
     PLOGE("allocate memory for string");

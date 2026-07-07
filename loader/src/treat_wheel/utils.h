@@ -5,7 +5,7 @@
 
 #include <android/log.h>
 
-#include "../treat_wheel/rz_daemon.h"
+#include "daemon.h"
 
 #ifdef DEBUG
   #define LOGD(...) do { __android_log_print(ANDROID_LOG_DEBUG, "ReZygisk-TW", __VA_ARGS__); } while (0)

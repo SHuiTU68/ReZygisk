@@ -1,6 +1,8 @@
 name: Untrusted CI
 
 on:
+  push:
+    branches: [ main, master ]
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -10,10 +12,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           submodules: "recursive"
           fetch-depth: 0
+
+      - name: Setup Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cryptography
 
       - name: Setup NDK_PATH
         run: echo "NDK_PATH=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
@@ -23,13 +30,15 @@ jobs:
           make all -j$(nproc)
 
       - name: Upload release
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
+          name: ReZygisk-release
           path: "build/out/ReZygisk-v*-release.zip"
-          archive: false
+          if-no-files-found: warn
 
       - name: Upload debug
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
+          name: ReZygisk-debug
           path: "build/out/ReZygisk-v*-debug.zip"
-          archive: false
+          if-no-files-found: warn

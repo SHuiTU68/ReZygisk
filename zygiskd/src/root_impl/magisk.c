@@ -73,10 +73,30 @@ bool magisk_uid_granted_root(uid_t uid) {
 }
 
 bool magisk_uid_should_umount(const char *const process) {
-  /* INFO: PROCESS_NAME_MAX_LEN already has a +1 for NULL */
-  char sqlite_cmd[59 + PROCESS_NAME_MAX_LEN];
+  /* INFO: PROCESS_NAME_MAX_LEN already has a +1 for NULL.
+   * Extra space for SQL-quote escaping (worst case: every char is a quote,
+   * which doubles to 2 chars) plus surrounding quotes and query overhead. */
+  char escaped_process[PROCESS_NAME_MAX_LEN * 2];
+  const char *src = process;
+  char *dst = escaped_process;
+  const char *dst_end = escaped_process + sizeof(escaped_process) - 1;
+  /* INFO: Escape double quotes by doubling them to prevent SQL injection.
+   * See: https://www.sqlite.org/lang_expr.html#string_literals */
+  while (*src && dst < dst_end) {
+    if (*src == '"') {
+      if (dst + 1 >= dst_end) break;
+      *dst++ = '"';
+      *dst++ = '"';
+      src++;
+    } else {
+      *dst++ = *src++;
+    }
+  }
+  *dst = '\0';
+
+  char sqlite_cmd[64 + PROCESS_NAME_MAX_LEN * 2];
   /* INFO: Find if process string starts with any data in "process" column */
-  snprintf(sqlite_cmd, sizeof(sqlite_cmd), "SELECT 1 FROM denylist WHERE \"%s\" LIKE process || '%%' LIMIT 1", process);
+  snprintf(sqlite_cmd, sizeof(sqlite_cmd), "SELECT 1 FROM denylist WHERE \"%s\" LIKE process || '%%' LIMIT 1", escaped_process);
 
   const char *const argv[] = { "magisk", "--sqlite", sqlite_cmd, NULL };
 

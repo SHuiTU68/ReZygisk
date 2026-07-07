@@ -14,8 +14,6 @@ import struct
 import hashlib
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
 def file_sign_data(name: str, filepath: str) -> bytes:
   """
     Build the sign data block for a single file:
@@ -40,6 +38,8 @@ def file_sign_data(name: str, filepath: str) -> bytes:
 
 def sign_machikado(module_dir: str, sig_name: str, abi: str, is_64bit: bool, private_key_bytes: bytes, public_key_bytes: bytes):
   """Sign a machikado file for a specific architecture."""
+
+  from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
   root = Path(module_dir)
   arch_suffix = "64" if is_64bit else "32"
@@ -113,6 +113,8 @@ def compute_sha256_hashes(module_dir: str):
 
 def sign_misaki(module_dir: str, private_key_bytes: bytes, public_key_bytes: bytes):
   """Sign misaki.sig for the entire module."""
+
+  from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
   root = Path(module_dir)
 

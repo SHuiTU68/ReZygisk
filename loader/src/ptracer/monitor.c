@@ -160,7 +160,19 @@ bool rezygiskd_listener_init() {
     .sun_path = { 0 }
   };
 
-  size_t sun_path_len = sprintf(addr.sun_path, "%s/%s", rezygiskd_get_path(), SOCKET_NAME);
+  /* INFO: Use snprintf to prevent buffer overflow of sun_path and
+   * reject paths that do not fit in the sun_path buffer. */
+  int written = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", rezygiskd_get_path(), SOCKET_NAME);
+  if (written < 0 || (size_t)written >= sizeof(addr.sun_path)) {
+    LOGE("socket path too long for sun_path buffer");
+
+    close(monitor_sock_fd);
+    monitor_sock_fd = -1;
+
+    return false;
+  }
+
+  size_t sun_path_len = (size_t)written;
 
   socklen_t socklen = sizeof(sa_family_t) + sun_path_len;
   if (bind(monitor_sock_fd, (struct sockaddr *)&addr, socklen) == -1) {
@@ -441,8 +453,8 @@ static bool ensure_daemon_created(bool is_64bit) {
   }
 
   if (pid == 0) {
-    char daemon_name[PATH_MAX] = "./bin/zygiskd";
-    strcat(daemon_name, is_64bit ? "64" : "32");
+    char daemon_name[PATH_MAX];
+    snprintf(daemon_name, sizeof(daemon_name), "./bin/zygiskd%s", is_64bit ? "64" : "32");
 
     execl(daemon_name, daemon_name, NULL);
 
@@ -747,7 +759,7 @@ void sigchld_listener_callback() {
 
                 if (p == 0) {
                   char pid_str[32];
-                  sprintf(pid_str, "%d", pid);
+                  snprintf(pid_str, sizeof(pid_str), "%d", pid);
 
                   LOGI("exec tracer command: %s trace %s --restart%s", tracer, pid_str, is_tango ? " --tango" : "");
 
@@ -815,22 +827,30 @@ void sigchld_listener_stop() {
 static char pre_section[1024];
 static char post_section[1024];
 
+/* INFO: Bounded string append to prevent buffer overflow from strcat.
+ * Appends `src` to `dst` without exceeding `dstsz` (including NUL). */
+#define BOUNDED_STRCAT(dst, dstsz, src)                                              \
+  do {                                                                               \
+    size_t _cur = strnlen((dst), (dstsz));                                           \
+    if (_cur < (dstsz)) snprintf((dst) + _cur, (dstsz) - _cur, "%s", (src));         \
+  } while (0)
+
 #define WRITE_STATUS_ABI(suffix)                                                     \
   if (status ## suffix.supported) {                                                  \
-    strcat(status_text, ", ReZygisk " # suffix "-bit: ");                            \
+    BOUNDED_STRCAT(status_text, sizeof(status_text), ", ReZygisk " # suffix "-bit: "); \
                                                                                      \
-    if (tracing_state != TRACING) strcat(status_text, "❌");                         \
+    if (tracing_state != TRACING) BOUNDED_STRCAT(status_text, sizeof(status_text), "❌"); \
     else if (status ## suffix.zygote_injected && status ## suffix.daemon_running)    \
-      strcat(status_text, "✅");                                                     \
-    else strcat(status_text, "⚠️");                                                  \
+      BOUNDED_STRCAT(status_text, sizeof(status_text), "✅");                        \
+    else BOUNDED_STRCAT(status_text, sizeof(status_text), "⚠️");                     \
                                                                                      \
     if (!status ## suffix.daemon_running) {                                          \
       if (status ## suffix.daemon_error_info) {                                      \
-        strcat(status_text, "(ReZygiskd: ");                                         \
-        strcat(status_text, status ## suffix.daemon_error_info);                     \
-        strcat(status_text, ")");                                                    \
+        BOUNDED_STRCAT(status_text, sizeof(status_text), "(ReZygiskd: ");            \
+        BOUNDED_STRCAT(status_text, sizeof(status_text), status ## suffix.daemon_error_info); \
+        BOUNDED_STRCAT(status_text, sizeof(status_text), ")");                       \
       } else {                                                                       \
-        strcat(status_text, "(ReZygiskd: not running)");                             \
+        BOUNDED_STRCAT(status_text, sizeof(status_text), "(ReZygiskd: not running)"); \
       }                                                                              \
     }                                                                                \
   }
@@ -853,18 +873,18 @@ static bool update_status(const char *message) {
   char status_text[256] = "Monitor: ";
   switch (tracing_state) {
     case TRACING: {
-      strcat(status_text, "✅");
+      BOUNDED_STRCAT(status_text, sizeof(status_text), "✅");
 
       break;
     }
     case STOPPING: [[fallthrough]];
     case STOPPED: {
-      strcat(status_text, "⛔");
+      BOUNDED_STRCAT(status_text, sizeof(status_text), "⛔");
 
       break;
     }
     case EXITING: {
-      strcat(status_text, "❌");
+      BOUNDED_STRCAT(status_text, sizeof(status_text), "❌");
 
       break;
     }
@@ -973,15 +993,15 @@ static bool prepare_environment() {
   char line[1024];
   while (fgets(line, sizeof(line), orig_prop) != NULL) {
     if (strncmp(line, "description=", strlen("description=")) == 0) {
-      strcat(pre_section, "description=");
-      strcat(post_section, line + strlen("description="));
+      BOUNDED_STRCAT(pre_section, sizeof(pre_section), "description=");
+      BOUNDED_STRCAT(post_section, sizeof(post_section), line + strlen("description="));
       after_description = true;
 
       continue;
     }
 
-    if (after_description) strcat(post_section, line);
-    else strcat(pre_section, line);
+    if (after_description) BOUNDED_STRCAT(post_section, sizeof(post_section), line);
+    else BOUNDED_STRCAT(pre_section, sizeof(pre_section), line);
   }
 
   fclose(orig_prop);

@@ -143,6 +143,17 @@ void rezygiskd_get_info(struct rezygisk_info *info) {
     return;
   }
 
+  /* INFO: Sanity check to prevent integer overflow on malloc and DoS */
+  if (info->modules.modules_count > MAX_MODULES_COUNT) {
+    LOGE("modules count too large: %zu (max %d)\n", info->modules.modules_count, MAX_MODULES_COUNT);
+
+    info->modules.modules_count = 0;
+
+    close(fd);
+
+    return;
+  }
+
   info->modules.modules = (char **)malloc(sizeof(char *) * info->modules.modules_count);
   if (!info->modules.modules) {
     PLOGE("allocating modules name memory");
@@ -158,6 +169,15 @@ void rezygiskd_get_info(struct rezygisk_info *info) {
     char *module_name = read_string(fd);
     if (module_name == NULL) {
       PLOGE("reading module name");
+
+      goto info_cleanup;
+    }
+
+    /* INFO: Prevent path traversal: module name must not contain '/' or ".." */
+    if (strchr(module_name, '/') != NULL || strcmp(module_name, "..") == 0) {
+      LOGE("invalid module name (path traversal attempt): %s\n", module_name);
+
+      free(module_name);
 
       goto info_cleanup;
     }
@@ -245,6 +265,15 @@ bool rezygiskd_read_modules(struct zygisk_modules *modules) {
 
   size_t len = 0;
   safe_read(read_size_t(fd, &len), "modules count", return false);
+
+  /* INFO: Sanity check to prevent integer overflow on malloc and DoS */
+  if (len > MAX_MODULES_COUNT) {
+    LOGE("modules count too large: %zu (max %d)\n", len, MAX_MODULES_COUNT);
+
+    close(fd);
+
+    return false;
+  }
 
   modules->modules = malloc(len * sizeof(char *));
   if (!modules->modules) {

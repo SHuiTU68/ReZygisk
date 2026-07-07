@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           submodules: "recursive"
           fetch-depth: 0
@@ -20,11 +20,16 @@ jobs:
           public_key: ${{ secrets.ORG_PUBLIC_KEY }}
         run: |
           if [ -z "$private_key" ] || [ -z "$public_key" ]; then
-            echo "Private or public key is not set."
+            echo "Private or public key is not set, building without signing."
           else
             echo "$private_key" | base64 -d > module/private_key
             echo "$public_key" | base64 -d > module/public_key
           fi
+
+      - name: Setup Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cryptography
 
       - name: Setup NDK_PATH
         run: echo "NDK_PATH=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
@@ -34,13 +39,15 @@ jobs:
           make all -j$(nproc)
 
       - name: Upload release
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
+          name: ReZygisk-release-signed
           path: "build/out/ReZygisk-v*-release.zip"
-          archive: false
+          if-no-files-found: warn
 
       - name: Upload debug
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
+          name: ReZygisk-debug-signed
           path: "build/out/ReZygisk-v*-debug.zip"
-          archive: false
+          if-no-files-found: warn

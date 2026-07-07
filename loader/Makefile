@@ -31,7 +31,7 @@ COMMON_SRCS = src/common/daemon.c src/common/elf_util.c src/common/ifunc_shim.c 
 INJECTOR_SRCS = src/injector/cpp_strings.c src/injector/entry.c \
 				 src/injector/hook.c src/injector/ptrace_clear.c \
 				 src/treat_wheel/hiding.c src/treat_wheel/elf_util.c \
-				 src/treat_wheel/utils.c src/treat_wheel/rz_daemon.c \
+				 src/treat_wheel/utils.c \
 				 src/treat_wheel/treat_wheel_adapter.c
 PTRACER_SRCS = src/ptracer/main.c src/ptracer/monitor.c src/ptracer/ptracer.c \
 			   src/ptracer/remote_csoloader.c src/ptracer/utils.c

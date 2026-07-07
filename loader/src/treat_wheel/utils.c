@@ -785,7 +785,7 @@ time_t tw_mono_sec_now(void) {
 #ifdef IS_ZYGISK_LIB
   bool tw_update_mnt_ns(enum mount_namespace_state mns_state) {
     char ns_path[PATH_MAX];
-    if (tw_rezygiskd_update_mns(mns_state, ns_path, sizeof(ns_path)) == false) {
+    if (rezygiskd_update_mns(mns_state, ns_path, sizeof(ns_path)) == false) {
       PLOGE("Failed to update mount namespace");
 
       return false;
