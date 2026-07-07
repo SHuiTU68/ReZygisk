@@ -76,16 +76,20 @@ struct tw_maps *tw_parse_maps(const char *filename) {
   }
 
   if (new_pid == 0) {
+    /* INFO: In child process after fork. Must use _exit() not return to avoid
+     * running atexit handlers and flushing stdio buffers of the parent. */
     FILE *fp = fopen(filename, "r");
     if (!fp) {
       PLOGE("Open maps");
 
-      return NULL;
+      _exit(1);
     }
 
     char line[4096 * 2];
     while (fgets(line, sizeof(line), fp) != NULL) {
-      line[strlen(line) - 1] = '\0';
+      /* INFO: Strip trailing newline safely (avoid underflow if line is empty) */
+      size_t line_len = strlen(line);
+      if (line_len > 0 && line[line_len - 1] == '\n') line[line_len - 1] = '\0';
 
       uintptr_t addr_start;
       uintptr_t addr_end;
@@ -94,12 +98,14 @@ struct tw_maps *tw_parse_maps(const char *filename) {
       unsigned int dev_major;
       unsigned int dev_minor;
       char permissions[5] = "";
-      int path_offset;
+      int path_offset = 0;
 
       sscanf(line,
              "%" PRIxPTR "-%" PRIxPTR " %4s %" PRIxPTR " %x:%x %lu %n%*s",
              &addr_start, &addr_end, permissions, &addr_offset, &dev_major, &dev_minor,
              &inode, &path_offset);
+
+      if (path_offset <= 0) continue;
 
       while (line[path_offset] == ' ')
         path_offset++;
@@ -108,10 +114,8 @@ struct tw_maps *tw_parse_maps(const char *filename) {
         if (tw_write_loop(tw_write_fd, &var, sizeof(var)) != sizeof(var)) { \
           PLOGE("Write " #var);                                       \
                                                                       \
-          close(tw_write_fd);                                            \
-          close(tw_read_fd);                                             \
-                                                                      \
-          return NULL;                                                \
+          fclose(fp);                                                 \
+          _exit(1);                                                   \
         }
 
       uint8_t has_more_maps = 1;
@@ -141,10 +145,8 @@ struct tw_maps *tw_parse_maps(const char *filename) {
         if (tw_write_loop(tw_write_fd, line + path_offset, path_len) != (ssize_t)path_len) {
           PLOGE("Write path");
 
-          close(tw_write_fd);
-          close(tw_read_fd);
-
-          return NULL;
+          fclose(fp);
+          _exit(1);
         }
       }
 
@@ -172,16 +174,10 @@ struct tw_maps *tw_parse_maps(const char *filename) {
   }
 
   maps->maps = NULL;
+  maps->size = 0;
 
   size_t i = 0;
   while (1) {
-    #define READ_AND_ASSURE(field)                                                                                \
-      if (tw_read_loop(tw_read_fd, &maps->maps[i].field, sizeof(maps->maps[i].field)) != sizeof(maps->maps[i].field)) { \
-        PLOGE("Read " #field);                                                                                    \
-                                                                                                                  \
-        goto maps_read_fail;                                                                                      \
-      }
-
     uint8_t has_more_maps = 0;
     if (tw_read_loop(tw_read_fd, &has_more_maps, sizeof(has_more_maps)) != sizeof(has_more_maps)) {
       PLOGE("Read has_more_maps");
@@ -191,12 +187,23 @@ struct tw_maps *tw_parse_maps(const char *filename) {
 
     if (!has_more_maps) break;
 
-    maps->maps = (struct tw_map *)realloc(maps->maps, (i + 1) * sizeof(struct tw_map));
-    if (!maps->maps) {
+    /* INFO: Use temp pointer for realloc to avoid losing original on failure */
+    struct tw_map *tmp_maps = (struct tw_map *)realloc(maps->maps, (i + 1) * sizeof(struct tw_map));
+    if (!tmp_maps) {
       PLOGE("Realloc maps");
 
       goto maps_read_fail;
     }
+    maps->maps = tmp_maps;
+    /* INFO: Initialize path to NULL so cleanup doesn't free garbage */
+    maps->maps[i].path = NULL;
+
+    #define READ_AND_ASSURE(field)                                                                                \
+      if (tw_read_loop(tw_read_fd, &maps->maps[i].field, sizeof(maps->maps[i].field)) != sizeof(maps->maps[i].field)) { \
+        PLOGE("Read " #field);                                                                                    \
+                                                                                                                  \
+        goto maps_read_fail;                                                                                      \
+      }
 
     READ_AND_ASSURE(addr_start);
     READ_AND_ASSURE(addr_end);
@@ -224,17 +231,21 @@ struct tw_maps *tw_parse_maps(const char *filename) {
       if (tw_read_loop(tw_read_fd, maps->maps[i].path, path_len) != (ssize_t)path_len) {
         PLOGE("Read path");
 
+        /* INFO: Free the partially-filled path buffer before cleanup */
+        free(maps->maps[i].path);
+        maps->maps[i].path = NULL;
+
         goto maps_read_fail;
       }
 
       maps->maps[i].path[path_len] = '\0';
-    } else {
-      maps->maps[i].path = NULL;
     }
 
     #undef READ_AND_ASSURE
 
     i++;
+    /* INFO: Update size so cleanup frees all completed entries including current */
+    maps->size = i;
 
     continue;
 
@@ -242,7 +253,9 @@ struct tw_maps *tw_parse_maps(const char *filename) {
       close(tw_write_fd);
       close(tw_read_fd);
 
-      maps->size = i;
+      /* INFO: Set size to i+1 to include the partially-filled current entry
+       * (its path was initialized to NULL or freed above, so tw_free_maps is safe) */
+      maps->size = i + 1;
       tw_free_maps(maps);
 
       waitpid(new_pid, NULL, 0);
@@ -261,6 +274,8 @@ struct tw_maps *tw_parse_maps(const char *filename) {
 }
 
 void tw_free_maps(struct tw_maps *maps) {
+  if (maps == NULL) return;
+
   if (maps->maps == NULL) {
     free(maps);
 
@@ -299,11 +314,12 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
   }
 
   if (new_pid == 0) {
+    /* INFO: In child process after fork. Must use _exit() not return. */
     FILE *fp = fopen(filename, "r");
     if (!fp) {
       LOGE("Open %s failed with %d: %s", filename, errno, strerror(errno));
 
-      return NULL;
+      _exit(1);
     }
 
     char line[4096 * 2];
@@ -336,10 +352,8 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
       if (tw_write_loop(tw_write_fd, &var, sizeof(var)) != sizeof(var)) { \
         PLOGE("write " #var);                                       \
                                                                     \
-        close(tw_write_fd);                                            \
-        close(tw_read_fd);                                             \
-                                                                    \
-        return NULL;                                                \
+        fclose(fp);                                                 \
+        _exit(1);                                                   \
       }
 
       #define WRITE_STRING_AND_ASSURE(var, len)                                                  \
@@ -347,20 +361,16 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
         if (tw_write_loop(tw_write_fd, &var ## _len, sizeof(size_t)) != sizeof(size_t)) {              \
           PLOGE("Write " #var "_len");                                                           \
                                                                                                  \
-          close(tw_write_fd);                                                                       \
-          close(tw_read_fd);                                                                        \
-                                                                                                 \
-          return NULL;                                                                           \
+          fclose(fp);                                                                                \
+          _exit(1);                                                                                \
         }                                                                                        \
                                                                                                  \
         if (var ## _len != 0) {                                                                  \
           if (tw_write_loop(tw_write_fd, line + var ## _start, var ## _len) != (ssize_t)var ## _len) { \
             PLOGE("Write " #var);                                                                \
                                                                                                  \
-            close(tw_write_fd);                                                                     \
-            close(tw_read_fd);                                                                      \
-                                                                                                 \
-            return NULL;                                                                         \
+            fclose(fp);                                                                             \
+            _exit(1);                                                                              \
           }                                                                                      \
         }
 
@@ -384,10 +394,8 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
       if (tw_write_loop(tw_write_fd, &has_more_maps, sizeof(has_more_maps)) != sizeof(has_more_maps)) {
         PLOGE("Write has_more_maps");
 
-        close(tw_write_fd);
-        close(tw_read_fd);
-
-        return NULL;
+        fclose(fp);
+        _exit(1);
       }
 
       WRITE_AND_ASSURE(id);
@@ -434,57 +442,41 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
 
   size_t i = 0;
   while (1) {
+    /* INFO: Error cleanup macro used after the current entry has been allocated.
+     * size is set to i+1 so tw_free_mountsinfo also frees the partially-filled
+     * current entry (its string pointers are NULL or malloc'd, both safe). */
+    #define MOUNTS_CLEANUP_FAIL()                  \
+      do {                                         \
+        close(tw_write_fd);                        \
+        close(tw_read_fd);                         \
+        mounts->size = i + 1;                      \
+        tw_free_mountsinfo(mounts);                \
+        return NULL;                               \
+      } while (0)
+
     #define READ_AND_ASSURE(field)                                                                                            \
       if (tw_read_loop(tw_read_fd, &mounts->mounts[i].field, sizeof(mounts->mounts[i].field)) != sizeof(mounts->mounts[i].field)) { \
         PLOGE("Read " #field);                                                                                                \
-                                                                                                                              \
-        close(tw_write_fd);                                                                                                      \
-        close(tw_read_fd);                                                                                                       \
-                                                                                                                              \
-        mounts->size = i;                                                                                                     \
-        tw_free_mountsinfo(mounts);                                                                                              \
-                                                                                                                              \
-        return NULL;                                                                                                          \
+        MOUNTS_CLEANUP_FAIL();                                                                                                \
       }
 
     #define READ_STRING_AND_ASSURE(var)                                                       \
       size_t var ## _len = 0;                                                                 \
       if (tw_read_loop(tw_read_fd, &var ## _len, sizeof(size_t)) != sizeof(size_t)) {               \
         PLOGE("Read " #var "_len");                                                           \
-                                                                                              \
-        close(tw_write_fd);                                                                      \
-        close(tw_read_fd);                                                                       \
-                                                                                              \
-        mounts->size = i;                                                                     \
-        tw_free_mountsinfo(mounts);                                                              \
-                                                                                              \
-        return NULL;                                                                          \
+        MOUNTS_CLEANUP_FAIL();                                                                \
       }                                                                                       \
                                                                                               \
       if (var ## _len != 0) {                                                                 \
         mounts->mounts[i].var = (char *)malloc(var ## _len + 1);                              \
         if (!mounts->mounts[i].var) {                                                         \
           PLOGE("Allocate memory for " #var);                                                 \
-                                                                                              \
-          close(tw_write_fd);                                                                    \
-          close(tw_read_fd);                                                                     \
-                                                                                              \
-          mounts->size = i;                                                                   \
-          tw_free_mountsinfo(mounts);                                                            \
-                                                                                              \
-          return NULL;                                                                        \
+          MOUNTS_CLEANUP_FAIL();                                                              \
         }                                                                                     \
                                                                                               \
         if (tw_read_loop(tw_read_fd, mounts->mounts[i].var, var ## _len) != (ssize_t)var ## _len) { \
           PLOGE("Read " #var);                                                                \
-                                                                                              \
-          close(tw_write_fd);                                                                    \
-          close(tw_read_fd);                                                                     \
-                                                                                              \
-          mounts->size = i;                                                                   \
-          tw_free_mountsinfo(mounts);                                                            \
-                                                                                              \
-          return NULL;                                                                        \
+          MOUNTS_CLEANUP_FAIL();                                                              \
         }                                                                                     \
                                                                                               \
         mounts->mounts[i].var[var ## _len] = '\0';                                            \
@@ -499,6 +491,7 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
       close(tw_write_fd);
       close(tw_read_fd);
 
+      /* INFO: Current entry not yet allocated, only free entries 0..i-1. */
       mounts->size = i;
       tw_free_mountsinfo(mounts);
 
@@ -507,18 +500,29 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
 
     if (!has_more_maps) break;
 
-    mounts->mounts = (struct tw_mountinfo *)realloc(mounts->mounts, (i + 1) * sizeof(struct tw_mountinfo));
-    if (!mounts->mounts) {
+    /* INFO: Use temp pointer for realloc to avoid losing original on failure */
+    struct tw_mountinfo *tmp_mounts = (struct tw_mountinfo *)realloc(mounts->mounts, (i + 1) * sizeof(struct tw_mountinfo));
+    if (!tmp_mounts) {
       PLOGE("Allocate memory for mounts->mounts");
 
       close(tw_write_fd);
       close(tw_read_fd);
 
+      /* INFO: realloc failed, current entry not allocated, free 0..i-1. */
       mounts->size = i;
       tw_free_mountsinfo(mounts);
 
       return NULL;
     }
+    mounts->mounts = tmp_mounts;
+    /* INFO: Initialize all string pointers to NULL so cleanup is safe */
+    mounts->mounts[i].root = NULL;
+    mounts->mounts[i].target = NULL;
+    mounts->mounts[i].vfs_option = NULL;
+    mounts->mounts[i].type = NULL;
+    mounts->mounts[i].source = NULL;
+    mounts->mounts[i].fs_option = NULL;
+    mounts->size = i + 1; /* include current entry for cleanup */
 
     READ_AND_ASSURE(id);
     READ_AND_ASSURE(parent);
@@ -531,40 +535,19 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
     unsigned int shared = 0;
     if (tw_read_loop(tw_read_fd, &shared, sizeof(shared)) != sizeof(shared)) {
       PLOGE("Read shared");
-
-      close(tw_write_fd);
-      close(tw_read_fd);
-
-      mounts->size = i;
-      tw_free_mountsinfo(mounts);
-
-      return NULL;
+      MOUNTS_CLEANUP_FAIL();
     }
 
     unsigned int master = 0;
     if (tw_read_loop(tw_read_fd, &master, sizeof(master)) != sizeof(master)) {
       PLOGE("Read master");
-
-      close(tw_write_fd);
-      close(tw_read_fd);
-
-      mounts->size = i;
-      tw_free_mountsinfo(mounts);
-
-      return NULL;
+      MOUNTS_CLEANUP_FAIL();
     }
 
     unsigned int propagate_from = 0;
     if (tw_read_loop(tw_read_fd, &propagate_from, sizeof(propagate_from)) != sizeof(propagate_from)) {
       PLOGE("Read propagate_from");
-
-      close(tw_write_fd);
-      close(tw_read_fd);
-
-      mounts->size = i;
-      tw_free_mountsinfo(mounts);
-
-      return NULL;
+      MOUNTS_CLEANUP_FAIL();
     }
 
     mounts->mounts[i].optional.shared = shared;
@@ -577,6 +560,7 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
 
     #undef READ_AND_ASSURE
     #undef READ_STRING_AND_ASSURE
+    #undef MOUNTS_CLEANUP_FAIL
 
     i++;
   }
@@ -592,6 +576,8 @@ struct tw_mountsinfo *tw_parse_mountinfo(const char *filename) {
 }
 
 void tw_free_mountsinfo(struct tw_mountsinfo *mounts) {
+  if (mounts == NULL) return;
+
   if (mounts->mounts == NULL) {
     free(mounts);
 

@@ -44,6 +44,9 @@ int tw_do_preinitialize(void) {
   if (pipe(pipes) == -1) {
     PLOGE("ZMLH: Pipe");
 
+    tw_free_maps(g_maps);
+    g_maps = NULL;
+
     return 0;
   }
 
@@ -53,6 +56,9 @@ int tw_do_preinitialize(void) {
 
     close(pipes[0]);
     close(pipes[1]);
+
+    tw_free_maps(g_maps);
+    g_maps = NULL;
 
     return 0;
   }
@@ -105,6 +111,12 @@ int tw_do_preinitialize(void) {
 
     close(pipes[0]);
 
+    /* INFO: Reap the child to avoid a zombie process. */
+    waitpid(pid, NULL, 0);
+
+    tw_free_maps(g_maps);
+    g_maps = NULL;
+
     return 0;
   }
 
@@ -112,6 +124,12 @@ int tw_do_preinitialize(void) {
     PLOGE("ZMLH: Read pipe mntent line");
 
     close(pipes[0]);
+
+    /* INFO: Reap the child to avoid a zombie process. */
+    waitpid(pid, NULL, 0);
+
+    tw_free_maps(g_maps);
+    g_maps = NULL;
 
     return 0;
   }
@@ -202,17 +220,50 @@ int tw_do_maps_hiding(struct api_table *api_table, JNIEnv *tw_env) {
 
     LOGI("MH: Hiding suspicious map: %p - %p", (void *)map->addr_start, (void *)map->addr_end);
 
+    /* INFO: Guard against malformed maps entries where addr_end <= addr_start,
+     * which would cause size to underflow to a huge value. */
+    if (map->addr_end <= map->addr_start) {
+      LOGW("MH: Skipping malformed map (end <= start): %p - %p", (void *)map->addr_start, (void *)map->addr_end);
+
+      continue;
+    }
+
     size_t size = (size_t)(map->addr_end - map->addr_start);
+    if (size == 0) continue;
+
     void *copy = mmap(NULL, size, PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (copy == MAP_FAILED) {
       PLOGE("MH: mmap anonymous buffer");
       continue;
     }
-    if ((map->perms & PROT_READ) == 0) mprotect((void *)map->addr_start, size, PROT_READ);
+
+    /* INFO: Make the source readable so we can copy it. If mprotect fails,
+     * the page is not readable and memcpy would SIGSEGV, so skip this map. */
+    if ((map->perms & PROT_READ) == 0) {
+      if (mprotect((void *)map->addr_start, size, PROT_READ) != 0) {
+        PLOGE("MH: mprotect for read");
+
+        munmap(copy, size);
+        continue;
+      }
+    }
 
     memcpy(copy, (void *)map->addr_start, size);
-    mremap(copy, size, size, MREMAP_MAYMOVE | MREMAP_FIXED, (void *)map->addr_start);
-    mprotect((void *)map->addr_start, size, map->perms);
+
+    /* INFO: mremap with MREMAP_FIXED moves the anonymous copy over the original
+     * mapping. If it fails, we must munmap the anonymous copy to avoid a leak
+     * and leave the original mapping untouched. */
+    if (mremap(copy, size, size, MREMAP_MAYMOVE | MREMAP_FIXED, (void *)map->addr_start) == MAP_FAILED) {
+      PLOGE("MH: mremap");
+
+      munmap(copy, size);
+      continue;
+    }
+
+    /* INFO: Restore original permissions on the replaced mapping. */
+    if (mprotect((void *)map->addr_start, size, map->perms) != 0) {
+      PLOGE("MH: mprotect restore perms");
+    }
   }
 
   LOGI("MH: Finished hiding maps traces.");
@@ -453,8 +504,8 @@ static inline uintptr_t _page_end(uintptr_t addr) {
   return _page_start(addr + system_page_size - 1);
 }
 
-void set_writable(struct AtExitArray *array, bool writable, size_t start_idx, size_t num_entries) {
-  if (array == NULL || array->array_ == NULL) return;
+bool set_writable(struct AtExitArray *array, bool writable, size_t start_idx, size_t num_entries) {
+  if (array == NULL || array->array_ == NULL) return false;
 
   size_t start_byte = _page_start(start_idx * sizeof(struct AtExitEntry));
   size_t stop_byte = _page_end((start_idx + num_entries) * sizeof(struct AtExitEntry));
@@ -464,10 +515,12 @@ void set_writable(struct AtExitArray *array, bool writable, size_t start_idx, si
   if (mprotect((char *)array->array_ + start_byte, byte_len, prot) != 0) {
     LOGE("Failed to mprotect atexit array: %s", strerror(errno));
 
-    return;
+    return false;
   }
 
   LOGI("Atexit array set to %s writable from index %zu to %zu", writable ? "writable" : "read-only", start_idx, start_idx + num_entries - 1);
+
+  return true;
 }
 
 struct map_range {
@@ -507,7 +560,13 @@ int tw_do_atexit_hiding(struct api_table *api_table, JNIEnv *tw_env) {
     }
   }
 
-  set_writable(atexit_array, true, 0, atexit_array->size_);
+  if (!set_writable(atexit_array, true, 0, atexit_array->size_)) {
+    LOGE("AH: Failed to make atexit array writable, aborting.");
+
+    tw_elf_destroy(libc);
+
+    return 0;
+  }
   size_t old_size = atexit_array->size_;
 
   LOGD("AH: Found atexit array at %p with size %zu and capacity %zu", (void *)atexit_array->array_, atexit_array->size_, atexit_array->capacity_);

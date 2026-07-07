@@ -1,6 +1,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <stdio.h>
 
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -19,6 +20,8 @@ const char *ksu_manager_paths[] = {
   "/data/user_de/0/me.weishu.kernelsu",
   "/data/user_de/0/com.rifsxd.ksunext",
 };
+
+#define KSUD_PATH "/data/adb/ksu/bin/ksud"
 
 /* INFO: It would be presumed it is a unsigned int,
            so we need to cast it to signed int to
@@ -89,6 +92,38 @@ struct ksu_denylist_entry {
 static struct ksu_denylist_entry denylist_cache[KSU_DENYLIST_CACHE_SIZE];
 static size_t denylist_cache_count = 0;
 
+/* INFO: Verify that ksud is not only present but also executable, and log its
+ * version. This confirms zygiskd can "connect to" ksud for userspace queries. */
+static bool ksu_verify_ksud(void) {
+  if (access(KSUD_PATH, F_OK | X_OK) == -1) {
+    return false;
+  }
+
+  /* INFO: Try to execute ksud to verify it runs. We use --version or -V as
+   * a harmless query. If ksud doesn't support these flags, it will still
+   * execute and exit, proving connectivity. */
+  char buf[256] = { 0 };
+  const char *const argv[] = { KSUD_PATH, "--version", NULL };
+  if (exec_command(buf, sizeof(buf), KSUD_PATH, argv)) {
+    /* INFO: ksud executed successfully. Log version if available. */
+    if (buf[0] != '\0') {
+      /* INFO: Strip trailing newline for cleaner log. */
+      size_t len = strlen(buf);
+      if (len > 0 && buf[len - 1] == '\n') buf[len - 1] = '\0';
+      LOGI("ksud verified: %s\n", buf);
+    } else {
+      LOGI("ksud verified (executed successfully)\n");
+    }
+    return true;
+  }
+
+  /* INFO: exec_command failed, but ksud might still be present. Don't fail
+   * here - the kernel interface is what matters, ksud is just for userspace
+   * queries. Fall back to existence-only check. */
+  LOGW("ksud exists but could not be executed: %s\n", strerror(errno));
+  return access(KSUD_PATH, F_OK) == 0;
+}
+
 void ksu_get_existence(struct root_impl_state *state) {
   char platform[PROP_VALUE_MAX];
   get_property("ro.board.platform", platform);
@@ -124,6 +159,9 @@ void ksu_get_existence(struct root_impl_state *state) {
         return;
       }
 
+      /* INFO: Verify ksud is executable and log its version. */
+      ksu_verify_ksud();
+
       state->state = Supported;
 
       char mode[16] = { 0 };
@@ -158,6 +196,9 @@ void ksu_get_existence(struct root_impl_state *state) {
 
     return;
   }
+
+  /* INFO: Verify ksud is executable and log its version. */
+  ksu_verify_ksud();
 
   ksu_uses_new_ksuctl = true;
 
@@ -261,6 +302,49 @@ bool ksu_uid_should_umount(uid_t uid) {
   return should_umount;
 }
 
+/* INFO: Discover the KSU manager UID when the kernel interface is unavailable
+ * (old KSU versions without CMD_GET_MANAGER_UID). This handles spoofed builds
+ * whose package name differs from the well-known paths by scanning:
+ *   1. All known manager data directory paths (not just the variant-selected one)
+ *   2. /data/system/packages.list for packages matching KSU naming patterns
+ * The result is cached permanently since the manager rarely changes. */
+static uid_t ksu_discover_manager_uid(void) {
+  /* INFO: 1. Scan all known manager data directory paths. */
+  size_t num_paths = sizeof(ksu_manager_paths) / sizeof(ksu_manager_paths[0]);
+  for (size_t i = 0; i < num_paths; i++) {
+    struct stat st;
+    if (stat(ksu_manager_paths[i], &st) == 0) {
+      LOGI("Found KSU manager data dir at %s (uid=%u)\n", ksu_manager_paths[i], st.st_uid);
+      return st.st_uid;
+    }
+  }
+
+  /* INFO: 2. Scan /data/system/packages.list for KSU manager packages.
+   * Format: <package_name> <uid> <debug_flag> <data_dir> <seinfo> ... */
+  FILE *fp = fopen("/data/system/packages.list", "r");
+  if (fp) {
+    char line[1024];
+    while (fgets(line, sizeof(line), fp)) {
+      char package[256];
+      uid_t pkg_uid = 0;
+      if (sscanf(line, "%255s %u", package, &pkg_uid) == 2) {
+        /* INFO: Match known KSU manager package name patterns. This handles
+         * spoofed builds that still contain "kernelsu" or "ksu" in the name. */
+        if (strstr(package, "kernelsu") != NULL ||
+            strstr(package, "ksunext") != NULL ||
+            strstr(package, "KernelSU") != NULL) {
+          LOGI("Found KSU manager package in packages.list: %s (uid=%u)\n", package, pkg_uid);
+          fclose(fp);
+          return pkg_uid;
+        }
+      }
+    }
+    fclose(fp);
+  }
+
+  return (uid_t)-1;
+}
+
 bool ksu_uid_is_manager(uid_t uid) {
   /* INFO: If the manager UID is set, we can use it to check if the UID
              is the manager UID, which is more reliable than checking
@@ -283,17 +367,17 @@ bool ksu_uid_is_manager(uid_t uid) {
       return uid == cached_manager_uid;
     }
 
-    const char *manager_path = ksu_manager_paths[variant];
-    struct stat st;
-    if (stat(manager_path, &st) == -1) {
-      if (errno != ENOENT) {
-        LOGE("Failed to stat KSU manager data directory: %s", strerror(errno));
-      }
-
-      return false;
+    /* INFO: Kernel interface unavailable. Use dynamic discovery as fallback,
+     * which scans all known paths and /data/system/packages.list to handle
+     * spoofed builds. Cache the result permanently. */
+    if (!manager_uid_cached) {
+      cached_manager_uid = ksu_discover_manager_uid();
+      manager_uid_cached = true;
     }
 
-    return st.st_uid == uid;
+    if (cached_manager_uid == (uid_t)-1) return false;
+
+    return uid == cached_manager_uid;
   }
 
   /* INFO: Cache manager uid permanently - manager package rarely changes. */
