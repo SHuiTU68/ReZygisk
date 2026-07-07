@@ -1,0 +1,81 @@
+<div class="panel">
+  <div class="header">Hrezygisk: {{title}}</div>
+
+  <div class="dimc" style="margin: 0 15px 0 15px; border-radius: 20px;">
+    <!-- INFO: Status / not-active notice -->
+    <div id="ma_not_active" class="dimc" style="padding: 15px 22px; border-radius: 20px; font-size: 0.9em; color: var(--text-secondary);">
+      {{notActive}}
+    </div>
+
+    <!-- INFO: Settings card: enable / mode / name -->
+    <div id="ma_settings" class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px; display: none;">
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{settings.enabled.title}}</div>
+          <div class="dimc desc action_card_description">{{settings.enabled.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="ma_enabled_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{settings.mountMode.title}}</div>
+          <div class="dimc desc action_card_description">{{settings.mountMode.description}}</div>
+        </div>
+        <select id="ma_mode_select" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em;">
+          <option value="auto">{{settings.mountMode.auto}}</option>
+          <option value="tmpfs">{{settings.mountMode.tmpfs}}</option>
+          <option value="ext4">{{settings.mountMode.ext4}}</option>
+          <option value="direct">{{settings.mountMode.direct}}</option>
+        </select>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{settings.fakeName.title}}</div>
+          <div class="dimc desc action_card_description">{{settings.fakeName.description}}</div>
+        </div>
+        <input id="ma_fake_name_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.fakeName.placeholder}}">
+      </div>
+
+      <!-- SAFETY: allow_system override toggle -->
+      <div class="small_card dimc" style="margin-bottom: 0;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{settings.allowSystem.title}}</div>
+          <div class="dimc desc action_card_description">{{settings.allowSystem.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="ma_allow_system_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- INFO: Exclusion list -->
+    <div id="ma_exclusions" class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px; display: none;">
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{exclusions.title}}</div>
+          <div class="dimc desc action_card_description">{{exclusions.description}}</div>
+        </div>
+      </div>
+
+      <div id="ma_no_modules" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0; display: none;">
+        {{exclusions.noModules}}
+      </div>
+
+      <div id="ma_module_list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+
+      <div class="dimc" style="font-size: 0.8em; color: var(--text-secondary); padding-top: 10px;">
+        {{exclusions.note}}
+      </div>
+    </div>
+
+    <div class="dimc" style="padding: 15px 22px 20px; font-size: 0.85em; color: var(--text-secondary);">
+      {{note}}
+    </div>
+  </div>
+</div>

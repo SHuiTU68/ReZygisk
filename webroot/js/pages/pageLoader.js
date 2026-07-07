@@ -15,6 +15,7 @@ export const allMainPages = [
   'modules',
   'actions',
   'treatwheel',
+  'metamount',
   'settings'
 ]
 

@@ -257,6 +257,7 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
 enabled=$META_ENABLED
 mount_mode=$META_MOUNT_MODE
 fake_mount_name=$META_FAKE_NAME
+allow_system=false
 skip_modules=""
 METACFG
 fi

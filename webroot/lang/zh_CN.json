@@ -79,33 +79,40 @@
           "title": "隐藏元模块挂载",
           "description": "为 denylist 应用卸载 Hrezygisk 元模块自身的 overlay 挂载（source=KSU/APatch）。仅在 KernelSU/APatch 元模块激活时有效。"
         }
-      },
-      "metaMount": {
-        "title": "元模块挂载排除",
-        "description": "选择哪些模块不被 Hrezygisk 元模块挂载。仅在 KernelSU/APatch 上启用。",
-        "note": "更改将在下次重启后生效。",
-        "notActive": "元模块未激活。在 KernelSU 或 APatch 上安装以启用。",
-        "noModules": "没有其他已安装的模块。",
-        "settings": {
-          "title": "元模块挂载设置",
-          "enabled": {
-            "title": "启用元模块挂载",
-            "description": "开关元模块挂载功能。关闭后 Hrezygisk 不挂载任何模块。"
-          },
-          "mountMode": {
-            "title": "挂载方式",
-            "description": "auto：依次探测 tmpfs/ext4/direct，选择第一个可用的。tmpfs：暂存到 /mnt/vendor/<名称>（最难检测）。ext4：loop 挂载 ext4 镜像（模拟旧版 KSU）。direct：upperdir 在 /data 上（最简单）。",
-            "auto": "auto",
-            "tmpfs": "tmpfs",
-            "ext4": "ext4",
-            "direct": "direct"
-          },
-          "fakeName": {
-            "title": "自定义挂载名称",
-            "description": "暂存点名称（/mnt/vendor/<名称>）。tmpfs 和 ext4 模式使用。",
-            "placeholder": "rezygisk"
-          }
+      }
+    },
+    "metamount": {
+      "title": "元模块挂载",
+      "notActive": "元模块未激活。在 KernelSU 或 APatch 上安装以启用。",
+      "note": "更改将在下次重启后生效。system 分区默认排除以防止无法开机。",
+      "settings": {
+        "enabled": {
+          "title": "启用元模块挂载",
+          "description": "开关元模块挂载功能。关闭后 Hrezygisk 不挂载任何模块。"
+        },
+        "mountMode": {
+          "title": "挂载方式",
+          "description": "auto：依次探测 tmpfs/ext4/direct，选择第一个可用的。tmpfs：暂存到 /mnt/vendor/<名称>（最难检测）。ext4：loop 挂载 ext4 镜像（模拟旧版 KSU）。direct：upperdir 在 /data 上（最简单）。",
+          "auto": "auto",
+          "tmpfs": "tmpfs",
+          "ext4": "ext4",
+          "direct": "direct"
+        },
+        "fakeName": {
+          "title": "自定义挂载名称",
+          "description": "暂存点名称（/mnt/vendor/<名称>）。tmpfs 和 ext4 模式使用。",
+          "placeholder": "rezygisk"
+        },
+        "allowSystem": {
+          "title": "允许挂载 system 分区（危险）",
+          "description": "对 /system 分区做 overlay 挂载。警告：这可能导致无法开机、黑屏或热重启。仅在确切知道自己在做什么时启用。"
         }
+      },
+      "exclusions": {
+        "title": "模块排除列表",
+        "description": "选择哪些模块不被 Hrezygisk 元模块挂载。",
+        "noModules": "没有其他已安装的模块。",
+        "note": "排除的模块不会被 metamount.sh 挂载。"
       }
     },
     "modules": {

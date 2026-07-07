@@ -82,6 +82,25 @@ _should_mount_module() {
 }
 
 # INFO: Collect partitions to overlay. Only top-level entries under system/.
+#
+# SAFETY: The "system" partition is EXCLUDED by default. Overlaying /system at
+# post-fs-data breaks system_server/zygote startup — the overlay upperdir may
+# not be fully visible to all processes at that early stage, causing missing
+# framework JARs → black screen → hot reboot loop. This was the root cause of
+# the bootloop users experienced. Only vendor/product/system_ext/odm and other
+# non-critical partitions are safe to overlay here.
+# The user can override this via allow_system=true in .rz_meta_cfg, but this is
+# strongly discouraged and logged as a warning.
+ALLOW_SYSTEM=false
+if [ -f "$CFG" ]; then
+  # re-read just this flag (already sourced above, but be explicit)
+  grep -q '^allow_system=true' "$CFG" 2>/dev/null && ALLOW_SYSTEM=true
+fi
+
+# SAFETY: DANGEROUS_PARTITIONS contains partitions that are known to cause
+# bootloops when overlaid at post-fs-data. "system" is the primary offender.
+DANGEROUS_PARTITIONS="system"
+
 PARTITIONS=""
 for mod in /data/adb/modules/*; do
   _should_mount_module "$mod" || continue
@@ -92,6 +111,17 @@ for mod in /data/adb/modules/*; do
     case "$pname" in
       ""|*..*|*/*) continue;;
     esac
+    # SAFETY: skip dangerous partitions unless explicitly allowed
+    if [ "$ALLOW_SYSTEM" != "true" ]; then
+      case " $DANGEROUS_PARTITIONS " in
+        *" $pname "*)
+          _meta_log "skip dangerous partition: $pname (set allow_system=true to override)"
+          continue
+          ;;
+      esac
+    else
+      _meta_log "WARNING: mounting dangerous partition $pname (user override)"
+    fi
     case " $PARTITIONS " in
       *" $pname "*) ;;
       *) PARTITIONS="$PARTITIONS $pname";;

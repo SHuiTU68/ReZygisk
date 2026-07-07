@@ -79,33 +79,40 @@
           "title": "Hide Meta Mounts",
           "description": "Umount Hrezygisk's own metamodule overlay mounts (source=KSU/APatch) for denylist apps. Only relevant on KernelSU/APatch where metamodule is active."
         }
-      },
-      "metaMount": {
-        "title": "Meta Mount Exclusions",
-        "description": "Choose which modules should NOT be mounted by Hrezygisk's metamodule. Only active on KernelSU/APatch.",
-        "note": "Changes take effect on next reboot.",
-        "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
-        "noModules": "No other modules installed.",
-        "settings": {
-          "title": "Meta Mount Settings",
-          "enabled": {
-            "title": "Enable Meta Mount",
-            "description": "Toggle metamodule mount on/off. When off, modules are not mounted by Hrezygisk."
-          },
-          "mountMode": {
-            "title": "Mount Mode",
-            "description": "auto: probe tmpfs/ext4/direct and pick the first that works. tmpfs: stage on /mnt/vendor/<name> (hardest to detect). ext4: loop-mounted ext4 image (mimics old KSU). direct: upperdir on /data (simplest).",
-            "auto": "auto",
-            "tmpfs": "tmpfs",
-            "ext4": "ext4",
-            "direct": "direct"
-          },
-          "fakeName": {
-            "title": "Fake Mount Name",
-            "description": "Custom name for the staging point (/mnt/vendor/<name>). Used by tmpfs and ext4 modes.",
-            "placeholder": "rezygisk"
-          }
+      }
+    },
+    "metamount": {
+      "title": "Meta Mount",
+      "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
+      "note": "Changes take effect on next reboot. The 'system' partition is excluded by default to prevent bootloops.",
+      "settings": {
+        "enabled": {
+          "title": "Enable Meta Mount",
+          "description": "Toggle metamodule mount on/off. When off, modules are not mounted by Hrezygisk."
+        },
+        "mountMode": {
+          "title": "Mount Mode",
+          "description": "auto: probe tmpfs/ext4/direct and pick the first that works. tmpfs: stage on /mnt/vendor/<name> (hardest to detect). ext4: loop-mounted ext4 image (mimics old KSU). direct: upperdir on /data (simplest).",
+          "auto": "auto",
+          "tmpfs": "tmpfs",
+          "ext4": "ext4",
+          "direct": "direct"
+        },
+        "fakeName": {
+          "title": "Fake Mount Name",
+          "description": "Custom name for the staging point (/mnt/vendor/<name>). Used by tmpfs and ext4 modes.",
+          "placeholder": "rezygisk"
+        },
+        "allowSystem": {
+          "title": "Allow System Partition (DANGEROUS)",
+          "description": "Overlay the /system partition. WARNING: This can cause bootloops, black screens, or hot reboots. Only enable if you know what you are doing."
         }
+      },
+      "exclusions": {
+        "title": "Module Exclusions",
+        "description": "Choose which modules should NOT be mounted by Hrezygisk's metamodule.",
+        "noModules": "No other modules installed.",
+        "note": "Excluded modules will not be overlaid by metamount.sh."
       }
     },
     "modules": {

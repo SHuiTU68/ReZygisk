@@ -97,63 +97,6 @@
       </div>
     </div>
 
-    <div class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px;">
-      <div class="small_card dimc" style="margin-bottom: 10px;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{metaMount.title}}</div>
-          <div class="dimc desc action_card_description">{{metaMount.description}}</div>
-        </div>
-      </div>
-
-      <div id="tw_meta_not_active" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0 10px; display: none;">
-        {{metaMount.notActive}}
-      </div>
-
-      <div id="tw_meta_settings" style="display: none;">
-        <div class="small_card dimc" style="margin-bottom: 10px;">
-          <div class="action_card">
-            <div class="dimc content action_card_title">{{metaMount.settings.enabled.title}}</div>
-            <div class="dimc desc action_card_description">{{metaMount.settings.enabled.description}}</div>
-          </div>
-          <label class="switch dimc">
-            <input id="tw_meta_enabled_switch" type="checkbox">
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="small_card dimc" style="margin-bottom: 10px;">
-          <div class="action_card">
-            <div class="dimc content action_card_title">{{metaMount.settings.mountMode.title}}</div>
-            <div class="dimc desc action_card_description">{{metaMount.settings.mountMode.description}}</div>
-          </div>
-          <select id="tw_meta_mode_select" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em;">
-            <option value="auto">{{metaMount.settings.mountMode.auto}}</option>
-            <option value="tmpfs">{{metaMount.settings.mountMode.tmpfs}}</option>
-            <option value="ext4">{{metaMount.settings.mountMode.ext4}}</option>
-            <option value="direct">{{metaMount.settings.mountMode.direct}}</option>
-          </select>
-        </div>
-
-        <div class="small_card dimc" style="margin-bottom: 10px;">
-          <div class="action_card">
-            <div class="dimc content action_card_title">{{metaMount.settings.fakeName.title}}</div>
-            <div class="dimc desc action_card_description">{{metaMount.settings.fakeName.description}}</div>
-          </div>
-          <input id="tw_meta_fake_name_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{metaMount.settings.fakeName.placeholder}}">
-        </div>
-      </div>
-
-      <div id="tw_meta_no_modules" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0; display: none;">
-        {{metaMount.noModules}}
-      </div>
-
-      <div id="tw_meta_module_list" style="display: flex; flex-direction: column; gap: 8px;"></div>
-
-      <div class="dimc" style="font-size: 0.8em; color: var(--text-secondary); padding-top: 10px;">
-        {{metaMount.note}}
-      </div>
-    </div>
-
     <div class="dimc" style="padding: 15px 22px 20px; font-size: 0.85em; color: var(--text-secondary);">
       {{description.note}}
     </div>
