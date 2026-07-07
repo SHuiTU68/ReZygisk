@@ -13,6 +13,12 @@
 #include "../treat_wheel/zygisk.h"
 #include "treat_wheel_adapter.h"
 
+/* INFO: Companion fd placeholder. The original Treat-Wheel module defined this
+ * for ReVanced mounts umount and custom font loading, which are removed from
+ * this build. Defined here to satisfy the linker for the unused functions in
+ * hiding.c that still reference it. */
+int cfd = -1;
+
 /* INFO: State path inside ReZygisk directory */
 #define TW_STATE_PATH "/data/adb/rezygisk/tw_state"
 
