@@ -23,7 +23,7 @@ const HidingState = {
 // `metaEnabled` / `mountMode` / `fakeName` mirror the other .rz_meta_cfg keys.
 const MetaMountState = {
   isEnabled: false,
-  metaEnabled: true,
+  metaEnabled: false,
   mountMode: 'auto',
   fakeName: 'rezygisk',
   skipModules: [],
@@ -167,7 +167,7 @@ async function _loadMetaEnabled() {
 // Missing or malformed file => defaults.
 async function _loadMetaCfg() {
   MetaMountState.skipModules = []
-  MetaMountState.metaEnabled = true
+  MetaMountState.metaEnabled = false
   MetaMountState.mountMode = 'auto'
   MetaMountState.fakeName = 'rezygisk'
   const r = await exec(`cat ${TW_META_CFG_PATH} 2>/dev/null`)

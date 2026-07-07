@@ -113,67 +113,142 @@ fi
 
 # INFO: Interactive metamodule configuration (KernelSU/APatch only).
 # On Magisk the metamodule hooks are never invoked, so we skip this entirely.
-# The KSU/APatch manager app provides an interactive console for customize.sh,
-# so `read` works there. If read times out or hits EOF (non-interactive flash),
-# sensible defaults are used. All settings can be changed later via WebUI.
-META_ENABLED=true
+#
+# SAFETY: metamount defaults to DISABLED. The user must explicitly press
+# volume-up to enable it. This prevents accidental bootloops/data loss from
+# automated installs or users who don't understand the feature.
+#
+# Volume key selection: KSU/APatch provide getevent at install time. We use
+# a simple chooseport helper that listens for the first volume key press.
+# Volume Up = first option, Volume Down = second option. Timeout falls back
+# to the safe default (disabled / first option).
+
+# chooseport: wait for a volume key press. Returns "up" or "down".
+# Timeout defaults to 15 seconds, returning "down" (safe/no choice) on timeout.
+_meta_chooseport() {
+  local timeout=${1:-15}
+  local result="down"
+
+  # Drain any pending events first
+  getevent -qlc 1 >/dev/null 2>&1 &
+  local drain_pid=$!
+  sleep 0.3
+  kill $drain_pid 2>/dev/null
+  wait $drain_pid 2>/dev/null
+
+  # Listen for volume keys with timeout
+  result=$(
+    timeout "$timeout" getevent -ql 2>/dev/null | while IFS= read -r line; do
+      case "$line" in
+        *KEY_VOLUMEUP*)
+          echo "up"
+          exit 0
+          ;;
+        *KEY_VOLUMEDOWN*)
+          echo "down"
+          exit 0
+          ;;
+      esac
+    done
+  )
+
+  # Empty result = timeout, default to down (safe)
+  [ -z "$result" ] && result="down"
+  printf '%s' "$result"
+}
+
+META_ENABLED=false
 META_MOUNT_MODE=auto
 META_FAKE_NAME=rezygisk
 
 if [ "$KSU" ] || [ "$APATCH" ]; then
   ui_print "*********************************************************"
-  ui_print " Metamodule Configuration"
+  ui_print " 元模块挂载配置"
   ui_print "*********************************************************"
+  ui_print ""
+  ui_print " 元模块挂载会在开机时接管所有模块的 system/ 挂载。"
+  ui_print " 这是一个高级功能，配置不当可能导致无法开机或数据丢失。"
+  ui_print ""
 
-  # INFO: Q1 — Enable metamount?
-  ui_print "- Enable metamodule mount? (Y/n)"
-  ui_print "  Enter = Yes (default), type n = No"
-  _ans=""
-  read -r -t 15 _ans 2>/dev/null || _ans=""
-  case "$_ans" in
-    [Nn]*) META_ENABLED=false; ui_print "  -> Disabled";;
-    *) META_ENABLED=true; ui_print "  -> Enabled";;
+  # Q1 — 是否启用元模块挂载？音量上=启用，音量下=不启用（默认）
+  ui_print " 是否启用元模块挂载？"
+  ui_print "  [音量上] = 启用"
+  ui_print "  [音量下] = 不启用（默认，推荐）"
+  ui_print "  15秒无操作默认不启用"
+  _key=$(_meta_chooseport 15)
+  case "$_key" in
+    up)
+      META_ENABLED=true
+      ui_print "  -> 已启用"
+      ;;
+    *)
+      META_ENABLED=false
+      ui_print "  -> 不启用"
+      ;;
   esac
 
   if [ "$META_ENABLED" = "true" ]; then
-    # INFO: Q2 — Mount mode. auto probes tmpfs → ext4 → direct and picks the
-    # first that works on this device. Concrete modes are tried first and fall
-    # through to the others on failure.
-    ui_print "- Mount mode:"
-    ui_print "  1 = auto   (probe tmpfs/ext4/direct, pick best) [default]"
-    ui_print "  2 = tmpfs  (stage on /mnt/vendor/<name>, hardest to detect)"
-    ui_print "  3 = ext4   (loop-mounted ext4 image, mimics old KSU)"
-    ui_print "  4 = direct (upperdir on /data, simplest)"
-    ui_print "  Enter = auto (default)"
-    _ans=""
-    read -r -t 15 _ans 2>/dev/null || _ans=""
-    case "$_ans" in
-      2) META_MOUNT_MODE=tmpfs;  ui_print "  -> tmpfs";;
-      3) META_MOUNT_MODE=ext4;   ui_print "  -> ext4";;
-      4) META_MOUNT_MODE=direct; ui_print "  -> direct";;
-      *) META_MOUNT_MODE=auto;   ui_print "  -> auto";;
-    esac
+    ui_print ""
 
-    # INFO: Q3 — Custom fake mount name (used by tmpfs/ext4 modes as the
-    # /mnt/vendor/<name> staging point). Always asked so the user can switch
-    # modes via WebUI without reconfiguring.
-    ui_print "- Fake mount name (default: rezygisk)"
-    ui_print "  Becomes /mnt/vendor/<name> in tmpfs/ext4 modes."
-    ui_print "  Enter = rezygisk (default)"
-    _ans=""
-    read -r -t 15 _ans 2>/dev/null || _ans=""
-    if [ -n "$_ans" ]; then
-      # Sanitize: only allow alphanumerics and underscore
-      _clean=$(printf '%s' "$_ans" | tr -cd 'A-Za-z0-9_')
-      if [ -n "$_clean" ]; then
-        META_FAKE_NAME="$_clean"
-      fi
+    # Q2 — 挂载方式
+    # 音量上=auto，音量下=tmpfs，需要4个选项用两轮选择
+    # 简化为：第一轮选 auto vs 手动指定，手动指定时再选
+    ui_print " 挂载方式（第一轮）："
+    ui_print "  [音量上] = auto（自动探测，默认）"
+    ui_print "  [音量下] = 手动指定"
+    _key=$(_meta_chooseport 15)
+    if [ "$_key" = "down" ]; then
+      ui_print ""
+      ui_print " 挂载方式（第二轮）："
+      ui_print "  [音量上] = tmpfs（最难检测）"
+      ui_print "  [音量下] = ext4（模拟旧版KSU）"
+      _key=$(_meta_chooseport 15)
+      case "$_key" in
+        up)   META_MOUNT_MODE=tmpfs;  ui_print "  -> tmpfs";;
+        down) META_MOUNT_MODE=ext4;   ui_print "  -> ext4";;
+        *)    META_MOUNT_MODE=ext4;   ui_print "  -> ext4（超时默认）";;
+      esac
+      ui_print ""
+      ui_print " 是否使用 direct 模式？"
+      ui_print "  [音量上] = 是，使用 direct（最简单）"
+      ui_print "  [音量下] = 否，使用上面选择的"
+      _key=$(_meta_chooseport 15)
+      case "$_key" in
+        up) META_MOUNT_MODE=direct; ui_print "  -> direct";;
+        *)  ui_print "  -> 保持之前选择: $META_MOUNT_MODE";;
+      esac
+    else
+      META_MOUNT_MODE=auto
+      ui_print "  -> auto"
     fi
-    ui_print "  -> $META_FAKE_NAME"
+
+    ui_print ""
+
+    # Q3 — 自定义挂载名称（用于 tmpfs/ext4 模式）
+    # 用音量键选择：使用默认 rezygisk，还是自定义（输入较复杂，音量键环境
+    # 无法输入文本，所以提供两个预设选项）
+    ui_print " 自定义挂载名称（tmpfs/ext4 模式使用）："
+    ui_print "  [音量上] = rezygisk（默认）"
+    ui_print "  [音量下] = system_overlay"
+    _key=$(_meta_chooseport 15)
+    case "$_key" in
+      up)
+        META_FAKE_NAME=rezygisk
+        ui_print "  -> rezygisk"
+        ;;
+      down)
+        META_FAKE_NAME=system_overlay
+        ui_print "  -> system_overlay"
+        ;;
+      *)
+        META_FAKE_NAME=rezygisk
+        ui_print "  -> rezygisk（超时默认）"
+        ;;
+    esac
   fi
 
   ui_print "*********************************************************"
-  ui_print " You can change these later via WebUI > Hiding"
+  ui_print " 配置已保存，可在 WebUI > 隐藏 中修改"
   ui_print "*********************************************************"
 
   # INFO: Persist the configuration so metamount.sh can source it on next boot.
