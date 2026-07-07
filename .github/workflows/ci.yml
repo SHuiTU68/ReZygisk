@@ -38,9 +38,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ReZygisk-${{ matrix.build_type }}
-          path: "build/out/ReZygisk-v*-${{ matrix.build_type }}.zip"
-          if-no-files-found: warn
+          name: Hrezygisk-${{ matrix.build_type }}
+          path: "build/out/Hrezygisk-v*-${{ matrix.build_type }}.zip"
+          if-no-files-found: error
           retention-days: 30
 
   release:
@@ -63,5 +63,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/ReZygisk-debug/*.zip
-            artifacts/ReZygisk-release/*.zip
+            artifacts/Hrezygisk-debug/*.zip
+            artifacts/Hrezygisk-release/*.zip
