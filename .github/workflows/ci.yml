@@ -1,15 +1,22 @@
-name: Untrusted CI
+name: CI
 
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
   merge_group:
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build (${{ matrix.build_type }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [ debug, release ]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,19 +33,35 @@ jobs:
         run: echo "NDK_PATH=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
 
       - name: Build
-        run: |
-          make all -j$(nproc)
+        run: make ${{ matrix.build_type }} -j$(nproc)
 
-      - name: Upload release
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ReZygisk-release
-          path: "build/out/ReZygisk-v*-release.zip"
+          name: ReZygisk-${{ matrix.build_type }}
+          path: "build/out/ReZygisk-v*-${{ matrix.build_type }}.zip"
           if-no-files-found: warn
+          retention-days: 30
 
-      - name: Upload debug
-        uses: actions/upload-artifact@v4
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: ReZygisk-debug
-          path: "build/out/ReZygisk-v*-debug.zip"
-          if-no-files-found: warn
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/ReZygisk-debug/*.zip
+            artifacts/ReZygisk-release/*.zip
