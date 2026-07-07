@@ -90,13 +90,15 @@
           },
           "mountMode": {
             "title": "Mount Mode",
-            "description": "tmpfs: stage on /mnt/vendor/<name> (harder to detect). direct: upperdir on /data (simpler). No ext4.",
+            "description": "auto: probe tmpfs/ext4/direct and pick the first that works. tmpfs: stage on /mnt/vendor/<name> (hardest to detect). ext4: loop-mounted ext4 image (mimics old KSU). direct: upperdir on /data (simplest).",
+            "auto": "auto",
             "tmpfs": "tmpfs",
+            "ext4": "ext4",
             "direct": "direct"
           },
           "fakeName": {
             "title": "Fake Mount Name",
-            "description": "Custom name for the tmpfs staging point (/mnt/vendor/<name>). Only used in tmpfs mode.",
+            "description": "Custom name for the staging point (/mnt/vendor/<name>). Used by tmpfs and ext4 modes.",
             "placeholder": "rezygisk"
           }
         }

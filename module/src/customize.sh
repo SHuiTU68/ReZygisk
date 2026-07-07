@@ -117,7 +117,7 @@ fi
 # so `read` works there. If read times out or hits EOF (non-interactive flash),
 # sensible defaults are used. All settings can be changed later via WebUI.
 META_ENABLED=true
-META_MOUNT_MODE=direct
+META_MOUNT_MODE=auto
 META_FAKE_NAME=rezygisk
 
 if [ "$KSU" ] || [ "$APATCH" ]; then
@@ -136,22 +136,29 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
   esac
 
   if [ "$META_ENABLED" = "true" ]; then
-    # INFO: Q2 — Mount mode (tmpfs vs direct). No ext4 option by design.
+    # INFO: Q2 — Mount mode. auto probes tmpfs → ext4 → direct and picks the
+    # first that works on this device. Concrete modes are tried first and fall
+    # through to the others on failure.
     ui_print "- Mount mode:"
-    ui_print "  1 = tmpfs  (stage on /mnt/vendor/<name>, harder to detect)"
-    ui_print "  2 = direct (upperdir on /data, simpler) [default]"
-    ui_print "  Enter = direct (default)"
+    ui_print "  1 = auto   (probe tmpfs/ext4/direct, pick best) [default]"
+    ui_print "  2 = tmpfs  (stage on /mnt/vendor/<name>, hardest to detect)"
+    ui_print "  3 = ext4   (loop-mounted ext4 image, mimics old KSU)"
+    ui_print "  4 = direct (upperdir on /data, simplest)"
+    ui_print "  Enter = auto (default)"
     _ans=""
     read -r -t 15 _ans 2>/dev/null || _ans=""
     case "$_ans" in
-      1) META_MOUNT_MODE=tmpfs; ui_print "  -> tmpfs";;
-      *) META_MOUNT_MODE=direct; ui_print "  -> direct";;
+      2) META_MOUNT_MODE=tmpfs;  ui_print "  -> tmpfs";;
+      3) META_MOUNT_MODE=ext4;   ui_print "  -> ext4";;
+      4) META_MOUNT_MODE=direct; ui_print "  -> direct";;
+      *) META_MOUNT_MODE=auto;   ui_print "  -> auto";;
     esac
 
-    # INFO: Q3 — Custom fake mount name (only relevant for tmpfs mode, but we
-    # always ask so the user can switch modes via WebUI without reconfiguring).
-    ui_print "- Fake mount name for tmpfs mode (default: rezygisk)"
-    ui_print "  This becomes /mnt/vendor/<name> in tmpfs mode."
+    # INFO: Q3 — Custom fake mount name (used by tmpfs/ext4 modes as the
+    # /mnt/vendor/<name> staging point). Always asked so the user can switch
+    # modes via WebUI without reconfiguring.
+    ui_print "- Fake mount name (default: rezygisk)"
+    ui_print "  Becomes /mnt/vendor/<name> in tmpfs/ext4 modes."
     ui_print "  Enter = rezygisk (default)"
     _ans=""
     read -r -t 15 _ans 2>/dev/null || _ans=""

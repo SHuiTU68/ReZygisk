@@ -116,8 +116,10 @@
             <div class="dimc desc action_card_description">{{metaMount.settings.mountMode.description}}</div>
           </div>
           <select id="tw_meta_mode_select" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em;">
-            <option value="direct">{{metaMount.settings.mountMode.direct}}</option>
+            <option value="auto">{{metaMount.settings.mountMode.auto}}</option>
             <option value="tmpfs">{{metaMount.settings.mountMode.tmpfs}}</option>
+            <option value="ext4">{{metaMount.settings.mountMode.ext4}}</option>
+            <option value="direct">{{metaMount.settings.mountMode.direct}}</option>
           </select>
         </div>
 

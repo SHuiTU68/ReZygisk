@@ -90,13 +90,15 @@
           },
           "mountMode": {
             "title": "挂载方式",
-            "description": "tmpfs：暂存到 /mnt/vendor/<名称>（更难检测）。direct：upperdir 在 /data 上（更简单）。不使用 ext4。",
+            "description": "auto：依次探测 tmpfs/ext4/direct，选择第一个可用的。tmpfs：暂存到 /mnt/vendor/<名称>（最难检测）。ext4：loop 挂载 ext4 镜像（模拟旧版 KSU）。direct：upperdir 在 /data 上（最简单）。",
+            "auto": "auto",
             "tmpfs": "tmpfs",
+            "ext4": "ext4",
             "direct": "direct"
           },
           "fakeName": {
             "title": "自定义挂载名称",
-            "description": "tmpfs 模式下暂存点的名称（/mnt/vendor/<名称>）。仅 tmpfs 模式使用。",
+            "description": "暂存点名称（/mnt/vendor/<名称>）。tmpfs 和 ext4 模式使用。",
             "placeholder": "rezygisk"
           }
         }

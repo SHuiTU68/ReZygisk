@@ -23,7 +23,7 @@ const HidingState = {
 const MetaMountState = {
   isEnabled: false,
   metaEnabled: true,
-  mountMode: 'direct',
+  mountMode: 'auto',
   fakeName: 'rezygisk',
   skipModules: [],
   availableModules: []
@@ -148,14 +148,14 @@ async function _loadMetaEnabled() {
 // INFO: Read all metamodule config from .rz_meta_cfg. Format (sourced by
 // metamount.sh):
 //   enabled=true|false
-//   mount_mode=tmpfs|direct
+//   mount_mode=auto|tmpfs|ext4|direct
 //   fake_mount_name=rezygisk
 //   skip_modules="id1 id2 id3"
 // Missing or malformed file => defaults.
 async function _loadMetaCfg() {
   MetaMountState.skipModules = []
   MetaMountState.metaEnabled = true
-  MetaMountState.mountMode = 'direct'
+  MetaMountState.mountMode = 'auto'
   MetaMountState.fakeName = 'rezygisk'
   const r = await exec(`cat ${TW_META_CFG_PATH} 2>/dev/null`)
   if (r.errno !== 0) return
@@ -173,7 +173,9 @@ async function _loadMetaCfg() {
     const mm = line.match(/^mount_mode=(.+)$/)
     if (mm) {
       const v = mm[1].trim()
-      if (v === 'tmpfs' || v === 'direct') MetaMountState.mountMode = v
+      if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') {
+        MetaMountState.mountMode = v
+      }
       return
     }
     const fm = line.match(/^fake_mount_name=(.+)$/)
