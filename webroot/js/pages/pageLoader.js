@@ -318,7 +318,7 @@ async function loadPages() {
         return;
       }
 
-      firstScript.parentNode.insertBefore(jsCode, first)
+      firstScript.parentNode.insertBefore(jsCode, firstScript)
     })
 
     /* PERF: Kick off module loadOnce without blocking the loop. */

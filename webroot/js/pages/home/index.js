@@ -65,6 +65,32 @@ async function _getStaticInfo() {
   return _staticInfoCache
 }
 
+// INFO: Detect metamodule activation + read .rz_meta_cfg to show the current
+// mount mode on the home page. Returns null if metamodule is not active (e.g.
+// on Magisk, or KSU/APatch where Hrezygisk isn't the active metamodule).
+let _metaMountCache = null
+async function _getMetaMountInfo() {
+  if (_metaMountCache) return _metaMountCache
+  const [linkR, cfgR] = await Promise.all([
+    exec('readlink /data/adb/metamodule 2>/dev/null'),
+    exec('cat /data/adb/rezygisk/.rz_meta_cfg 2>/dev/null')
+  ])
+  const active = (linkR.errno === 0 && /rezygisk$/.test(linkR.stdout.trim()))
+  let enabled = false
+  let mode = 'auto'
+  if (cfgR.errno === 0) {
+    cfgR.stdout.split('\n').forEach((line) => {
+      if (line.match(/^enabled=(.+)$/)) enabled = line.split('=')[1].trim() === 'true'
+      if (line.match(/^mount_mode=(.+)$/)) {
+        const v = line.split('=')[1].trim()
+        if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') mode = v
+      }
+    })
+  }
+  _metaMountCache = { active, enabled, mode }
+  return _metaMountCache
+}
+
 async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
   const rootCss = document.querySelector(':root')
   const rz_state = document.getElementById('rz_state')
@@ -161,10 +187,11 @@ export async function loadOnce() {
 export async function loadOnceView() {
   /* PERF: Parallelize static info fetch with state and strings fetch, instead
    * of awaiting three sequential exec() calls. */
-  const [staticInfo, ReZygiskState, strings] = await Promise.all([
+  const [staticInfo, ReZygiskState, strings, metaMount] = await Promise.all([
     _getStaticInfo(),
     _getReZygiskState(),
-    getStrings(whichCurrentPage())
+    getStrings(whichCurrentPage()),
+    _getMetaMountInfo()
   ])
 
   document.getElementById('version_code').innerHTML = staticInfo.version
@@ -176,6 +203,21 @@ export async function loadOnceView() {
   if (root_impl === 'Multiple') root_impl = strings.rootImpls.multiple
 
   document.getElementById('root_impl').innerHTML = root_impl
+
+  // INFO: Show meta mount mode row only when metamodule is active.
+  const metaClassEl = document.getElementById('meta_mount_class')
+  const metaRowEl = document.getElementById('meta_mount_row')
+  const metaStatusEl = document.getElementById('meta_mount_status')
+  if (metaMount && metaMount.active && metaClassEl && metaRowEl) {
+    metaClassEl.style.display = 'block'
+    metaRowEl.style.display = 'block'
+    if (metaStatusEl) {
+      const modeLabel = strings.info.metaMount.modes[metaMount.mode] || metaMount.mode
+      metaStatusEl.innerHTML = metaMount.enabled
+        ? `${strings.info.metaMount.enabled} · ${modeLabel}`
+        : strings.info.metaMount.disabled
+    }
+  }
 
   _updateDynamicElement(true, ReZygiskState, strings)
 

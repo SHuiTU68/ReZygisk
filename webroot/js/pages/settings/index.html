@@ -56,6 +56,38 @@
     </label>
   </div>
 
+  <!-- INFO: Font size + weight adjustment -->
+  <div class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{fontSize.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{fontSize.description}}
+      </div>
+    </div>
+    <div class="dimc" style="display: flex; align-items: center; gap: 10px; margin-top: 8px; width: 100%;">
+      <input id="rz_font_size_range" type="range" min="12" max="22" step="1" value="16" class="dimc" style="flex: 1;">
+      <span id="rz_font_size_value" class="dimc desc" style="font-size: 0.9em; min-width: 38px; text-align: right;">16px</span>
+    </div>
+  </div>
+
+  <div class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{fontWeight.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{fontWeight.description}}
+      </div>
+    </div>
+    <select id="rz_font_weight_select" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em;">
+      <option value="400">{{fontWeight.regular}}</option>
+      <option value="500">{{fontWeight.medium}}</option>
+      <option value="700">{{fontWeight.bold}}</option>
+    </select>
+  </div>
+
   <!-- INFO: Credit card -->
   <div class="dim card" style="margin-top: 15px;">
     <div class="dimc content">

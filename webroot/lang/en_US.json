@@ -18,6 +18,18 @@
           "injected": "Injected",
           "notInjected": "Not Injected",
           "unknown": "Unknown"
+        },
+        "metaMount": {
+          "title": "Meta Mount",
+          "mode": "Mount Mode",
+          "enabled": "Enabled",
+          "disabled": "Disabled",
+          "modes": {
+            "auto": "auto",
+            "tmpfs": "tmpfs",
+            "ext4": "ext4",
+            "direct": "direct"
+          }
         }
       }
     },
@@ -139,6 +151,17 @@
       "font": {
         "title": "Enable system font",
         "description": "This option will enable system font in current WebUI. NOTE: May not be compatible with FlipFont"
+      },
+      "fontSize": {
+        "title": "Font Size",
+        "description": "Adjust the base font size of the WebUI. Affects all text that scales with em/rem units."
+      },
+      "fontWeight": {
+        "title": "Font Weight",
+        "description": "Choose the default text weight.",
+        "regular": "Regular (400)",
+        "medium": "Medium (500)",
+        "bold": "Bold (700)"
       },
       "moduleDevelopers": "Module Developer(s)",
       "WebUIDevelopers": "WebUI Developer(s)",

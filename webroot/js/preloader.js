@@ -38,6 +38,21 @@ if (ConfigState.enableSystemFont) {
     }`
 }
 
+/* INFO: Apply saved font size + weight at boot so the user's preference is
+ * visible immediately. Settings page re-applies on change. */
+{
+  const headTag = document.getElementsByTagName('head')[0]
+  const styleTag = document.createElement('style')
+  styleTag.id = 'font-prefs-tag'
+  headTag.appendChild(styleTag)
+  const _fs = ConfigState.fontSize || 16
+  const _fw = ConfigState.fontWeight || 400
+  styleTag.innerHTML = `
+    html { font-size: ${_fs}px; }
+    body { font-weight: ${_fw}; }
+  `
+}
+
 /* INFO: This code are meant to load the link with any card have credit-link attribute inside it */
 document.addEventListener('click', async (event) => {
   const getLink = event.target.getAttribute('credit-link')

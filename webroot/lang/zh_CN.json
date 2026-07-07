@@ -18,6 +18,18 @@
           "injected": "已注入",
           "notInjected": "未注入",
           "unknown": "未知"
+        },
+        "metaMount": {
+          "title": "元模块挂载",
+          "mode": "挂载方式",
+          "enabled": "已启用",
+          "disabled": "未启用",
+          "modes": {
+            "auto": "auto",
+            "tmpfs": "tmpfs",
+            "ext4": "ext4",
+            "direct": "direct"
+          }
         }
       }
     },
@@ -139,6 +151,17 @@
       "font": {
         "title": "启用系统字体",
         "description": "此选项会在Web界面启用系统字体。可能与FlipFont不兼容。"
+      },
+      "fontSize": {
+        "title": "字体大小",
+        "description": "调整 WebUI 的基础字体大小。影响所有使用 em/rem 单位的文本。"
+      },
+      "fontWeight": {
+        "title": "字体粗细",
+        "description": "选择默认文本粗细。",
+        "regular": "常规 (400)",
+        "medium": "中等 (500)",
+        "bold": "粗体 (700)"
       },
       "moduleDevelopers": "模块开发者",
       "WebUIDevelopers": "WebUI 开发者",
