@@ -599,42 +599,35 @@ export async function reloadPage() {
   utils.reapplyListeners()
 }
 
-/* PERF: In-memory cache for parsed language JSON. The original code re-fetched
- * and re-parsed the language JSON on every page switch (and every reloadPage),
- * causing redundant I/O. The language file changes only on setLanguage(), which
- * clears the cache. */
-const _stringsCache = new Map()
-function _invalidateStringsCache() { _stringsCache.clear() }
+/* PERF: In-memory cache for the raw language JSON object (not the per-page
+ * extracted view). The raw object has .pages/.globals so fallback re-extraction
+ * works correctly. Cleared on setLanguage(). */
+const _langJsonCache = new Map()
+function _invalidateStringsCache() { _langJsonCache.clear() }
+
+function _fetchLangJson(langId) {
+  let cached = _langJsonCache.get(langId)
+  if (cached) return cached
+  /* INFO: Store the in-flight promise so concurrent callers share one fetch. */
+  cached = fetch(`lang/${langId}.json`)
+    .then((response) => response.json())
+    .catch(() => null)
+  _langJsonCache.set(langId, cached)
+  return cached
+}
 
 export function getStrings(pageId, forceDefault = false) {
   const langId = forceDefault ? 'en_US' : (localStorage.getItem(`/${moduleName}/language`) || 'en_US')
 
-  let langData = _stringsCache.get(langId)
-  if (!langData) {
-    langData = fetch(`lang/${langId}.json`)
-      .then((response) => response.json())
-      .then((data) => {
-        _stringsCache.set(langId, Promise.resolve(data))
-        return data
-      })
-      .catch((err) => {
-        if (!forceDefault) {
-          toast('Error loading strings for the selected language, loading default (en_US) strings.')
-
-          return getStrings(pageId, true)
-        }
-
-        toast('Error loading default strings!')
-        console.error(`Failed to load default strings for page ${pageId}: `, err)
-
-        return false
-      })
-    /* INFO: Store the in-flight promise so concurrent callers share one fetch. */
-    _stringsCache.set(langId, langData)
-  }
-
-  return Promise.resolve(langData).then((data) => {
-    if (!data) return false
+  return _fetchLangJson(langId).then((data) => {
+    if (!data && !forceDefault) {
+      toast('Error loading strings for the selected language, loading default (en_US) strings.')
+      return getStrings(pageId, true)
+    }
+    if (!data) {
+      toast('Error loading default strings!')
+      return false
+    }
     return {
       ...data.pages[pageId],
       ...data.globals,
@@ -651,10 +644,19 @@ export function setLanguage(langId) {
 }
 
 (async () => {
-  await loadPages()
+  try {
+    await loadPages()
+  } catch (e) {
+    console.error('loadPages failed:', e)
+    toast('Error loading pages, entering safe mode.')
+  }
 
-  loadPage('home')
-  loadNavbar()
+  try {
+    loadPage('home')
+    loadNavbar()
+  } catch (e) {
+    console.error('Initial page load failed:', e)
+  }
 })()
 
 /* INFO: Global error handling to catch any unhandled errors and log them to a file for debugging purposes. */

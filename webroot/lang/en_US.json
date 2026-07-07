@@ -71,9 +71,9 @@
           "title": "Frida Traces Hiding",
           "description": "Hide Frida-related traces from detection (experimental)."
         },
-        "overlayfsHiding": {
-          "title": "OverlayFS Hiding",
-          "description": "Unmount overlay (ext4-backed) module mounts to hide root traces from mountinfo."
+        "envSanitization": {
+          "title": "Environment Sanitization",
+          "description": "Clear LD_PRELOAD, MAGISK_*, and other root-related environment variables from app processes."
         }
       }
     },

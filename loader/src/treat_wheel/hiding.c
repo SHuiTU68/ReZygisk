@@ -806,98 +806,93 @@ int tw_do_frida_hiding(struct api_table *api_table, JNIEnv *tw_env) {
   return 1;
 }
 
-/* INFO: OverlayFS/ext4 mount hiding.
+/* INFO: Environment variable sanitization.
  *
- * Modules mounted via OverlayFS (type "overlay") on ext4 or other backing
- * stores can leak root presence through /proc/self/mountinfo and
- * /proc/self/mounts. This function parses /proc/self/mountinfo in a forked
- * child (to avoid being detected by touching /proc in the app process),
- * identifies overlay mounts that are likely module/root-related, and
- * umounts them (or bind-covers them if umount2 fails). */
-int tw_do_overlayfs_hiding(struct api_table *api_table, JNIEnv *tw_env) {
+ * Clears environment variables that can leak root/Zygisk presence to
+ * denylisted apps. Apps and anti-cheat libraries commonly check for:
+ *   - LD_PRELOAD / LD_LIBRARY_PATH: custom library injection
+ *   - MAGISK_*: Magisk daemon environment
+ *   - _RZ_*: ReZygisk internal variables
+ *   - TW_*: TreatWheel internal variables
+ *
+ * This runs early in the app process, before app code can read environ. */
+int tw_do_env_sanitization(struct api_table *api_table, JNIEnv *tw_env) {
   (void) api_table; (void) tw_env;
 
-  LOGI("OH: OverlayFS hiding is enabled, hiding overlay mounts.");
+  static const char *const kAlwaysClear[] = {
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "_RZ_INJECTED",
+    "_RZ_SOCKET",
+    "TW_STATE",
+    "MAGISK_INJECTED",
+    "MAGISK_PATH",
+    NULL
+  };
 
-  struct tw_mountsinfo *mounts = tw_parse_mountinfo("/proc/self/mountinfo");
-  if (!mounts) {
-    LOGE("OH: Failed to parse mountinfo.");
+  for (size_t i = 0; kAlwaysClear[i] != NULL; i++) {
+    if (getenv(kAlwaysClear[i]) != NULL) {
+      unsetenv(kAlwaysClear[i]);
+    }
+  }
 
+  /* INFO: Clear any variable with known root-related prefixes by
+   * iterating through environ. This catches dynamically-set vars
+   * like MAGISK_XXX, KSU_XXX, APATCH_XXX that aren't in the static
+   * list. */
+  extern char **environ;
+  /* INFO: Build a list of vars to unset first, then unset them.
+   * Modifying environ while iterating it is undefined behavior. */
+  size_t to_clear_count = 0;
+  size_t to_clear_cap = 32;
+  char **to_clear = (char **)calloc(to_clear_cap, sizeof(char *));
+  if (!to_clear) {
+    LOGE("ES: Failed to allocate clear list.");
     return 0;
   }
 
-  size_t unmounted = 0;
-  size_t covered = 0;
+  for (char **ep = environ; *ep != NULL; ep++) {
+    const char *entry = *ep;
+    const char *eq = strchr(entry, '=');
+    if (!eq) continue;
+    size_t name_len = (size_t)(eq - entry);
 
-  /* INFO: Iterate in reverse order to umount children before parents. */
-  for (size_t i = mounts->size; i > 0; i--) {
-    struct tw_mountinfo *m = &mounts->mounts[i - 1];
+    static const struct { const char *prefix; size_t len; } prefixes[] = {
+      { "MAGISK_", 7 },
+      { "_RZ_", 4 },
+      { "TW_", 3 },
+      { "KSU_", 4 },
+      { "APATCH_", 7 },
+      { NULL, 0 }
+    };
 
-    /* INFO: Only consider overlay-typed mounts. */
-    if (!m->type || strcmp(m->type, "overlay") != 0) continue;
-
-    bool should_hide = false;
-
-    /* INFO: Overlay on system partitions (regardless of root impl). */
-    if (m->target &&
-        (strncmp(m->target, "/system/", 8) == 0 ||
-         strncmp(m->target, "/vendor/", 8) == 0 ||
-         strncmp(m->target, "/product/", 9) == 0 ||
-         strncmp(m->target, "/system_ext/", 12) == 0)) {
-      should_hide = true;
-    }
-
-    /* INFO: Overlay backed by module directories. */
-    if (!should_hide && m->source && strstr(m->source, "/data/adb/modules") != NULL) {
-      should_hide = true;
-    }
-    if (!should_hide && m->fs_option && strstr(m->fs_option, "/data/adb/modules") != NULL) {
-      should_hide = true;
-    }
-    /* INFO: Overlay backed by KernelSU/APatch work directories. */
-    if (!should_hide && m->fs_option &&
-        (strstr(m->fs_option, "/data/adb/ksu") != NULL ||
-         strstr(m->fs_option, "/data/adb/ap") != NULL)) {
-      should_hide = true;
-    }
-
-    if (!should_hide) continue;
-
-    if (umount2(m->target, MNT_DETACH) == 0) {
-      LOGI("OH: Unmounted overlay %s", m->target);
-      unmounted++;
-      continue;
-    }
-
-    /* INFO: Fallback: bind-cover the target so its overlay contents are
-     * hidden even if umount2 fails (e.g. strongly-bound overlayfs).
-     * Directories get a tmpfs bind; files get /dev/null. */
-    struct stat st;
-    if (stat(m->target, &st) != 0) {
-      LOGE("OH: stat %s: %s", m->target, strerror(errno));
-      continue;
-    }
-
-    if (S_ISDIR(st.st_mode)) {
-      if (mount("tmpfs", m->target, "tmpfs", MS_BIND | MS_PRIVATE, NULL) == 0) {
-        LOGI("OH: Covered (bind tmpfs) %s", m->target);
-        covered++;
-      } else {
-        LOGE("OH: Failed to bind-cover %s: %s", m->target, strerror(errno));
-      }
-    } else {
-      if (mount("/dev/null", m->target, NULL, MS_BIND | MS_PRIVATE, NULL) == 0) {
-        LOGI("OH: Covered (bind /dev/null) %s", m->target);
-        covered++;
-      } else {
-        LOGE("OH: Failed to bind-cover file %s: %s", m->target, strerror(errno));
+    for (size_t p = 0; prefixes[p].prefix != NULL; p++) {
+      if (name_len >= prefixes[p].len &&
+          strncmp(entry, prefixes[p].prefix, prefixes[p].len) == 0) {
+        char *name = (char *)malloc(name_len + 1);
+        if (name) {
+          memcpy(name, entry, name_len);
+          name[name_len] = '\0';
+          if (to_clear_count >= to_clear_cap) {
+            to_clear_cap *= 2;
+            char **new_list = (char **)realloc(to_clear, to_clear_cap * sizeof(char *));
+            if (!new_list) { free(name); continue; }
+            to_clear = new_list;
+          }
+          to_clear[to_clear_count++] = name;
+        }
+        break;
       }
     }
   }
 
-  tw_free_mountsinfo(mounts);
+  for (size_t i = 0; i < to_clear_count; i++) {
+    unsetenv(to_clear[i]);
+    free(to_clear[i]);
+  }
+  free(to_clear);
 
-  LOGI("OH: Finished hiding overlay mounts (%zu unmounted, %zu covered).", unmounted, covered);
+  LOGI("ES: Sanitized %zu environment variables.", to_clear_count);
 
   return 1;
 }
