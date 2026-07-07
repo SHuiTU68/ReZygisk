@@ -74,6 +74,33 @@ int monitor_epoll_fd;
 bool monitor_events_running = true;
 typedef void (*monitor_event_callback_t)();
 
+/* INFO: Write a JSON-escaped string to a FILE*. Escapes ", \, control chars
+ * and newlines to prevent JSON injection from daemon-provided data (which
+ * comes over the socket and could be attacker-controlled if the daemon is
+ * compromised). Falls back to fputc/fputs so no extra allocation is needed. */
+static void json_write_escaped_string(FILE *out, const char *s) {
+  if (!s) return;
+  for (const char *p = s; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    switch (c) {
+      case '"':  fputs("\\\"", out); break;
+      case '\\': fputs("\\\\", out); break;
+      case '\b': fputs("\\b", out);  break;
+      case '\f': fputs("\\f", out);  break;
+      case '\n': fputs("\\n", out);  break;
+      case '\r': fputs("\\r", out);  break;
+      case '\t': fputs("\\t", out);  break;
+      default:
+        if (c < 0x20) {
+          fprintf(out, "\\u%04x", c);
+        } else {
+          fputc(c, out);
+        }
+        break;
+    }
+  }
+}
+
 bool monitor_events_init() {
   monitor_epoll_fd = epoll_create(1);
   if (monitor_epoll_fd == -1) {
@@ -623,7 +650,11 @@ void sigchld_listener_callback() {
     while ((pid = waitpid(-1, &sigchld_status, __WALL | WNOHANG)) != 0) {
       if (pid == -1) {
         if (tracing_state == STOPPED && errno == ECHILD) break;
+        /* INFO: On any other waitpid error (e.g. persistent EINVAL), break out
+         * of the loop to avoid an infinite loop and prevent storing pid=-1
+         * in sigchld_process[], which would corrupt the tracing state. */
         PLOGE("waitpid");
+        break;
       }
 
       if (pid == 1) {
@@ -927,12 +958,17 @@ static bool update_status(const char *message) {
     }
 
     fprintf(json, "{\n");
-    fprintf(json, "  \"root\": \"%s\",\n", environment_information64.root_impl ? environment_information64.root_impl : environment_information32.root_impl);
+    fputs("  \"root\": \"", json);
+    json_write_escaped_string(json, environment_information64.root_impl ? environment_information64.root_impl : environment_information32.root_impl);
+    fputs("\",\n", json);
 
     fprintf(json, "  \"monitor\": {\n");
     fprintf(json, "    \"state\": \"%d\"", tracing_state);
-    if (monitor_stop_reason) fprintf(json, ",\n    \"reason\": \"%s\",\n", monitor_stop_reason);
-    else fprintf(json, "\n");
+    if (monitor_stop_reason) {
+      fputs(",\n    \"reason\": \"", json);
+      json_write_escaped_string(json, monitor_stop_reason);
+      fputs("\",\n", json);
+    } else fprintf(json, "\n");
 
     if (status64.supported || status32.supported)
       fprintf(json, "  },\n");
@@ -945,12 +981,18 @@ static bool update_status(const char *message) {
       if (status64.supported) {
         fprintf(json, "    \"64\": {\n");
         fprintf(json, "      \"state\": %d,\n", status64.daemon_running);
-        if (status64.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", status64.daemon_error_info);
+        if (status64.daemon_error_info) {
+          fputs("      \"reason\": \"", json);
+          json_write_escaped_string(json, status64.daemon_error_info);
+          fputs("\",\n", json);
+        }
         fprintf(json, "      \"modules\": [");
 
         if (environment_information64.modules) for (uint32_t i = 0; i < environment_information64.modules_len; i++) {
           if (i > 0) fprintf(json, ", ");
-          fprintf(json, "\"%s\"", environment_information64.modules[i]);
+          fputc('"', json);
+          json_write_escaped_string(json, environment_information64.modules[i]);
+          fputc('"', json);
         }
 
         fprintf(json, "]\n");
@@ -962,12 +1004,18 @@ static bool update_status(const char *message) {
       if (status32.supported) {
         fprintf(json, "    \"32\": {\n");
         fprintf(json, "      \"state\": %d,\n", status32.daemon_running);
-        if (status32.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", status32.daemon_error_info);
+        if (status32.daemon_error_info) {
+          fputs("      \"reason\": \"", json);
+          json_write_escaped_string(json, status32.daemon_error_info);
+          fputs("\",\n", json);
+        }
         fprintf(json, "      \"modules\": [");
 
         if (environment_information32.modules) for (uint32_t i = 0; i < environment_information32.modules_len; i++) {
           if (i > 0) fprintf(json, ", ");
-          fprintf(json, "\"%s\"", environment_information32.modules[i]);
+          fputc('"', json);
+          json_write_escaped_string(json, environment_information32.modules[i]);
+          fputc('"', json);
         }
 
         fprintf(json, "]\n");

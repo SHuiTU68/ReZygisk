@@ -28,8 +28,15 @@ int rezygiskd_connect(uint8_t retry) {
 
     Sources:
      - https://pubs.opengroup.org/onlinepubs/009696699/basedefs/sys/un.h.html
+
+    INFO: Use snprintf with bounds check instead of strcpy to prevent stack
+    buffer overflow if TMP_PATH is misconfigured too long.
   */
-  strcpy(addr.sun_path, sock_path);
+  if (snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path) >= (int)sizeof(addr.sun_path)) {
+    LOGE("Socket path too long for sun_path: %s", sock_path);
+
+    return -1;
+  }
   socklen_t socklen = sizeof(addr);
 
   /* INFO: Exponential backoff starting at 100ms, capped at 1s. This avoids

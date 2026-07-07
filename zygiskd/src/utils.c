@@ -289,14 +289,45 @@ int read_fd(int fd) {
   return sendfd;
 }
 
-#define write_func(type)                    \
-  ssize_t write_## type(int fd, type val) { \
-    return write(fd, &val, sizeof(type));   \
+/* INFO: Loop-based write/read to handle partial writes/reads on Unix sockets.
+ * The previous bare write()/read() could return partial data for types like
+ * size_t (8 bytes on 64-bit), causing protocol desynchronization. */
+static ssize_t write_all(int fd, const void *buf, size_t len) {
+  size_t total = 0;
+  while (total < len) {
+    ssize_t ret = write(fd, (const char *)buf + total, len - total);
+    if (ret == -1) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (ret == 0) return -1;
+    total += (size_t)ret;
+  }
+  return (ssize_t)total;
+}
+
+static ssize_t read_all(int fd, void *buf, size_t len) {
+  size_t total = 0;
+  while (total < len) {
+    ssize_t ret = read(fd, (char *)buf + total, len - total);
+    if (ret == -1) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (ret == 0) return -1;
+    total += (size_t)ret;
+  }
+  return (ssize_t)total;
+}
+
+#define write_func(type)                            \
+  ssize_t write_## type(int fd, type val) {         \
+    return write_all(fd, &val, sizeof(type));       \
   }
 
-#define read_func(type)                     \
-  ssize_t read_## type(int fd, type *val) { \
-    return read(fd, val, sizeof(type));     \
+#define read_func(type)                             \
+  ssize_t read_## type(int fd, type *val) {         \
+    return read_all(fd, val, sizeof(type));         \
   }
 
 write_func(size_t)
@@ -310,26 +341,28 @@ read_func(uint8_t)
 
 ssize_t write_string(int fd, const char *restrict str) {
   size_t str_len = strlen(str);
-  ssize_t written_bytes = write(fd, &str_len, sizeof(size_t));
+  ssize_t written_bytes = write_all(fd, &str_len, sizeof(size_t));
   if (written_bytes != sizeof(size_t)) {
     LOGE("Failed to write string length: Not all bytes were written (%zd != %zu).", written_bytes, sizeof(size_t));
 
     return -1;
   }
 
-  written_bytes = write(fd, str, str_len);
-  if ((size_t)written_bytes != str_len) {
-    LOGE("Failed to write string: Not all bytes were written.");
+  if (str_len > 0) {
+    written_bytes = write_all(fd, str, str_len);
+    if ((size_t)written_bytes != str_len) {
+      LOGE("Failed to write string: Not all bytes were written.");
 
-    return -1;
+      return -1;
+    }
   }
 
-  return written_bytes;
+  return (ssize_t)str_len;
 }
 
 ssize_t read_string(int fd, char *restrict buf, size_t buf_size) {
   size_t str_len = 0;
-  ssize_t read_bytes = read(fd, &str_len, sizeof(size_t));
+  ssize_t read_bytes = read_all(fd, &str_len, sizeof(size_t));
   if (read_bytes != (ssize_t)sizeof(size_t)) {
     LOGE("Failed to read string length: Not all bytes were read (%zd != %zu).", read_bytes, sizeof(size_t));
 
@@ -342,14 +375,17 @@ ssize_t read_string(int fd, char *restrict buf, size_t buf_size) {
     return -1;
   }
 
-  read_bytes = read(fd, buf, str_len);
-  if (read_bytes != (ssize_t)str_len) {
-    LOGE("Failed to read string: Promised bytes doesn't exist (%zd != %zu).", read_bytes, str_len);
+  if (str_len > 0) {
+    read_bytes = read_all(fd, buf, str_len);
+    if (read_bytes != (ssize_t)str_len) {
+      LOGE("Failed to read string: Promised bytes doesn't exist (%zd != %zu).", read_bytes, str_len);
 
-    return -1;
+      return -1;
+    }
+    buf[str_len] = '\0';
+  } else {
+    buf[0] = '\0';
   }
-
-  if (str_len > 0) buf[str_len] = '\0';
 
   return read_bytes;
 }

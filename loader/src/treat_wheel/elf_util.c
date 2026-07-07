@@ -248,7 +248,17 @@ struct elf_img *tw_elf_create(const char *elf, void *base) {
   if (img->header->e_shoff == 0 || img->header->e_shentsize == 0 || img->header->e_shnum == 0) {
     LOGW("Section header table missing or invalid in %s", img->elf);
   } else {
-    img->section_header = offsetOf_Shdr(img->header, img->header->e_shoff);
+    /* INFO: Validate that the section header table lies within the loaded
+     * buffer to prevent out-of-bounds reads from a malicious/corrupted ELF.
+     * e_shnum * e_shentsize can overflow on 32-bit, so use 64-bit math. */
+    uint64_t shdr_total = (uint64_t)img->header->e_shnum * (uint64_t)img->header->e_shentsize;
+    if (img->header->e_shoff >= img->size ||
+        shdr_total > img->size - img->header->e_shoff) {
+      LOGE("Section header table out of bounds in %s (e_shoff=%llu, total=%llu, size=%zu)",
+           img->elf, (unsigned long long)img->header->e_shoff, (unsigned long long)shdr_total, img->size);
+    } else {
+      img->section_header = offsetOf_Shdr(img->header, img->header->e_shoff);
+    }
   }
 
   if (img->header->e_phoff == 0 || img->header->e_phentsize == 0 || img->header->e_phnum == 0) {
@@ -413,6 +423,13 @@ struct elf_img *tw_elf_create(const char *elf, void *base) {
 
   bool bias_calculated = false;
   if (img->header->e_phoff > 0 && img->header->e_phnum > 0) {
+    /* INFO: Validate program header table bounds to prevent out-of-bounds reads. */
+    uint64_t phdr_total = (uint64_t)img->header->e_phnum * (uint64_t)img->header->e_phentsize;
+    if (img->header->e_phoff >= img->size ||
+        phdr_total > img->size - img->header->e_phoff) {
+      LOGE("Program header table out of bounds in %s (e_phoff=%llu, total=%llu, size=%zu)",
+           img->elf, (unsigned long long)img->header->e_phoff, (unsigned long long)phdr_total, img->size);
+    } else {
     ElfW(Phdr) *phdr = (ElfW(Phdr) *)((uintptr_t)img->header + img->header->e_phoff);
     ElfW(Dyn) *dyn = NULL;
 
@@ -516,6 +533,7 @@ struct elf_img *tw_elf_create(const char *elf, void *base) {
 
       break;
     }
+    } /* end else (program header table valid) */
   }
 
   if (!bias_calculated)
@@ -614,9 +632,13 @@ ElfW(Addr) GnuLookup(struct elf_img *restrict img, const char *name, uint32_t ha
   char *strings = (char *)img->strtab_start;
   uint32_t chain_val = img->gnu_chain_[sym_index - img->gnu_symndx_];
 
-  ElfW(Word) dynsym_count = img->dynsym->sh_size / img->dynsym->sh_entsize;
+  /* INFO: Guard against division by zero if dynsym sh_entsize is 0 (malformed ELF). */
+  ElfW(Word) dynsym_count = 0;
+  if (img->dynsym->sh_entsize > 0) {
+    dynsym_count = img->dynsym->sh_size / img->dynsym->sh_entsize;
+  }
   if (sym_index >= dynsym_count) {
-    LOGE("Symbol index %u out of bounds", sym_index);
+    LOGE("Symbol index %u out of bounds (dynsym_count=%u)", sym_index, dynsym_count);
 
     return 0;
   }
@@ -669,9 +691,22 @@ ElfW(Addr) ElfLookup(struct elf_img *restrict img, const char *restrict name, ui
   if (img->nbucket_ == 0 || !img->bucket_ || !img->chain_ || !img->dynsym_start || !img->strtab_start)
     return 0;
 
+  /* INFO: Compute dynsym_count to bound the chain traversal. Without this,
+   * a corrupted ELF with a self-referencing chain or an out-of-range index
+   * causes an infinite loop or out-of-bounds read. */
+  ElfW(Word) dynsym_count = 0;
+  if (img->dynsym && img->dynsym->sh_entsize > 0) {
+    dynsym_count = img->dynsym->sh_size / img->dynsym->sh_entsize;
+  }
+
   char *strings = (char *)img->strtab_start;
 
-  for (size_t n = img->bucket_[hash % img->nbucket_]; n != STN_UNDEF; n = img->chain_[n]) {
+  /* INFO: Cap iterations to prevent infinite loops on corrupted chains. */
+  for (size_t n = img->bucket_[hash % img->nbucket_], iter = 0;
+       n != STN_UNDEF && iter < dynsym_count;
+       n = img->chain_[n], iter++) {
+    if (n >= dynsym_count) break;
+
     ElfW(Sym) *sym = img->dynsym_start + n;
 
     if (strcmp(name, strings + sym->st_name) == 0 && sym->st_shndx != SHN_UNDEF) {

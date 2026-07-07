@@ -521,15 +521,35 @@ static void initialize_jni_hook(void) {
 
 /* INFO: Module registration and API functions */
 static void api_plt_hook_register(const char *regex, const char *symbol, void *fn, void **backup) {
-  if (!g_ctx || !regex || !symbol || !fn || g_ctx->register_info_count >= MAX_REGISTER_INFO) return;
+  if (!g_ctx || !regex || !symbol || !fn) return;
 
   regex_t re;
   if (regcomp(&re, regex, REG_NOSUB) != 0) return;
 
   pthread_mutex_lock(&g_ctx->hook_info_lock);
 
+  /* INFO: Boundary check inside the lock to prevent TOCTOU race that would
+   * overflow register_info[] when two threads both pass the check before
+   * either acquires the mutex. */
+  if (g_ctx->register_info_count >= MAX_REGISTER_INFO) {
+    pthread_mutex_unlock(&g_ctx->hook_info_lock);
+
+    regfree(&re);
+
+    return;
+  }
+
+  char *symbol_copy = strdup(symbol);
+  if (!symbol_copy) {
+    pthread_mutex_unlock(&g_ctx->hook_info_lock);
+
+    regfree(&re);
+
+    return;
+  }
+
   g_ctx->register_info[g_ctx->register_info_count].regex = re;
-  g_ctx->register_info[g_ctx->register_info_count].symbol = strdup(symbol);
+  g_ctx->register_info[g_ctx->register_info_count].symbol = symbol_copy;
   g_ctx->register_info[g_ctx->register_info_count].callback = fn;
   g_ctx->register_info[g_ctx->register_info_count].backup = backup;
   g_ctx->register_info_count++;
@@ -538,15 +558,33 @@ static void api_plt_hook_register(const char *regex, const char *symbol, void *f
 }
 
 static void api_plt_hook_exclude(const char *regex, const char *symbol) {
-  if (!g_ctx || !regex || g_ctx->ignore_info_count >= MAX_IGNORE_INFO) return;
+  if (!g_ctx || !regex) return;
 
   regex_t re;
   if (regcomp(&re, regex, REG_NOSUB) != 0) return;
 
   pthread_mutex_lock(&g_ctx->hook_info_lock);
 
+  /* INFO: Boundary check inside the lock (same TOCTOU fix as above). */
+  if (g_ctx->ignore_info_count >= MAX_IGNORE_INFO) {
+    pthread_mutex_unlock(&g_ctx->hook_info_lock);
+
+    regfree(&re);
+
+    return;
+  }
+
+  char *symbol_copy = symbol ? strdup(symbol) : NULL;
+  if (symbol && !symbol_copy) {
+    pthread_mutex_unlock(&g_ctx->hook_info_lock);
+
+    regfree(&re);
+
+    return;
+  }
+
   g_ctx->ignore_info[g_ctx->ignore_info_count].regex = re;
-  g_ctx->ignore_info[g_ctx->ignore_info_count].symbol = symbol ? strdup(symbol) : NULL;
+  g_ctx->ignore_info[g_ctx->ignore_info_count].symbol = symbol_copy;
   g_ctx->ignore_info_count++;
 
   pthread_mutex_unlock(&g_ctx->hook_info_lock);
@@ -864,6 +902,12 @@ static void mark_fds_allowed(struct zygisk_context *ctx, JNIEnv *env, jintArray 
   if (!fdsArray) return;
 
   jint *arr = (*env)->GetIntArrayElements(env, fdsArray, NULL);
+  if (!arr) {
+    /* INFO: JNI OOM returns NULL; skip rather than dereference. */
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+
+    return;
+  }
   jint len = (*env)->GetArrayLength(env, fdsArray);
 
   for (jint i = 0; i < len; ++i) {
@@ -1162,6 +1206,15 @@ static void rz_app_specialize_post(struct zygisk_context *ctx) {
 
 static void rz_nativeSpecializeAppProcess_pre(struct zygisk_context *ctx) {
   ctx->process = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->nice_name, NULL);
+  if (!ctx->process) {
+    /* INFO: JNI OOM can return NULL; clear the pending exception and bail out
+     * to avoid passing NULL to LOGV (%s is UB) and ReleaseStringUTFChars. */
+    if ((*ctx->env)->ExceptionCheck(ctx->env)) (*ctx->env)->ExceptionClear(ctx->env);
+
+    LOGE("Failed to get process name string");
+
+    return;
+  }
   LOGV("pre specialize [%s]", ctx->process);
 
   FLAG_SET(ctx, SKIP_FD_SANITIZATION);
@@ -1197,6 +1250,13 @@ static void rz_nativeForkSystemServer_post(struct zygisk_context *ctx) {
 
 static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
   ctx->process = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->nice_name, NULL);
+  if (!ctx->process) {
+    if ((*ctx->env)->ExceptionCheck(ctx->env)) (*ctx->env)->ExceptionClear(ctx->env);
+
+    LOGE("Failed to get process name string");
+
+    return;
+  }
   LOGV("pre forkAndSpecialize [%s]", ctx->process);
   FLAG_SET(ctx, APP_FORK_AND_SPECIALIZE);
 

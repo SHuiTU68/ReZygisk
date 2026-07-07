@@ -78,6 +78,18 @@ static void denylist_cache_store(const char *process, bool should_umount) {
 static bool manager_uid_cached = false;
 static uid_t cached_manager_uid = (uid_t)-1;
 
+/* INFO: Cache for uid_granted_root to avoid fork+exec(magisk --sqlite) on
+ * every app fork. Root grant policy rarely changes, so use a longer TTL. */
+#define GRANTED_ROOT_CACHE_TTL_SEC 60
+#define GRANTED_ROOT_CACHE_SIZE 64
+struct granted_root_cache_entry {
+  uid_t uid;
+  bool granted;
+  time_t timestamp;
+  bool valid;
+};
+static struct granted_root_cache_entry granted_root_cache[GRANTED_ROOT_CACHE_SIZE];
+
 void magisk_get_existence(struct root_impl_state *state) {
   const char *magisk_files[] = {
     SBIN_MAGISK,
@@ -116,6 +128,20 @@ void magisk_get_existence(struct root_impl_state *state) {
 }
 
 bool magisk_uid_granted_root(uid_t uid) {
+  /* INFO: Check TTL cache first to avoid fork+exec(magisk --sqlite) on every
+   * app fork. Root grant policy rarely changes, so a 60s TTL is safe. */
+  time_t now = time(NULL);
+  for (size_t i = 0; i < GRANTED_ROOT_CACHE_SIZE; i++) {
+    if (!granted_root_cache[i].valid) continue;
+    if (now - granted_root_cache[i].timestamp > GRANTED_ROOT_CACHE_TTL_SEC) {
+      granted_root_cache[i].valid = false;
+      continue;
+    }
+    if (granted_root_cache[i].uid == uid) {
+      return granted_root_cache[i].granted;
+    }
+  }
+
   char sqlite_cmd[256];
   snprintf(sqlite_cmd, sizeof(sqlite_cmd), "select 1 from policies where uid=%d and policy=2 limit 1", uid);
 
@@ -128,7 +154,27 @@ bool magisk_uid_granted_root(uid_t uid) {
     return false;
   }
 
-  return result[0] != '\0';
+  bool granted = result[0] != '\0';
+
+  /* INFO: Store in cache. Find an invalid slot or the oldest entry. */
+  size_t oldest = 0;
+  time_t oldest_ts = now;
+  for (size_t i = 0; i < GRANTED_ROOT_CACHE_SIZE; i++) {
+    if (!granted_root_cache[i].valid) {
+      oldest = i;
+      break;
+    }
+    if (granted_root_cache[i].timestamp < oldest_ts) {
+      oldest_ts = granted_root_cache[i].timestamp;
+      oldest = i;
+    }
+  }
+  granted_root_cache[oldest].uid = uid;
+  granted_root_cache[oldest].granted = granted;
+  granted_root_cache[oldest].timestamp = now;
+  granted_root_cache[oldest].valid = true;
+
+  return granted;
 }
 
 bool magisk_uid_should_umount(const char *const process) {

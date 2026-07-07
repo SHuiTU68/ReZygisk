@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <jni.h>
@@ -31,8 +32,20 @@ static bool g_tw_initialized = false;
  * fork. Only re-parse when the file has actually been modified by WebUI. */
 static time_t g_tw_state_mtime = 0;
 static bool g_tw_state_loaded = false;
+/* INFO: stat() TTL to avoid a stat syscall on every single app fork. The
+ * state file only changes when WebUI writes to it, so a short TTL is safe. */
+#define TW_STATE_STAT_TTL_SEC 5
+static time_t g_tw_last_stat_time = 0;
 
 static void tw_load_state(void) {
+  /* INFO: Skip stat() entirely if we checked recently and the file was loaded.
+   * This avoids one stat syscall per app fork on the hot path. */
+  time_t now = time(NULL);
+  if (g_tw_state_loaded && g_tw_last_stat_time != 0 && (now - g_tw_last_stat_time) < TW_STATE_STAT_TTL_SEC) {
+    return;
+  }
+  g_tw_last_stat_time = now;
+
   struct stat st;
   if (stat(TW_STATE_PATH, &st) == 0) {
     /* INFO: Skip re-parsing if the file hasn't changed since last read */

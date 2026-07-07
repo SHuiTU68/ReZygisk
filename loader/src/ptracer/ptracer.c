@@ -251,7 +251,16 @@ bool inject_on_main(int pid, const char *lib_path) {
     return false;
   }
 
-  if (!get_regs(pid, &regs)) return false;
+  /* INFO: Use goto cleanup pattern so all early-return paths free `map` (and
+   * local_map once allocated) to avoid leaking heap memory on injection
+   * failures, which happen frequently during Zygote restarts. */
+  struct maps_info *local_map = NULL;
+
+  if (!get_regs(pid, &regs)) {
+    free_maps(map);
+
+    return false;
+  }
 
   uintptr_t arg = (uintptr_t)regs.REG_SP;
 
@@ -260,20 +269,43 @@ bool inject_on_main(int pid, const char *lib_path) {
 
   LOGV("kernel argument %" PRIxPTR " %s", arg, addr_mem_region);
 
-  int argc;
+  int argc = 0;
   char **argv = (char **)((uintptr_t *)arg + 1);
   LOGV("argv %p", (void *)argv);
 
-  read_proc(pid, arg, &argc, sizeof(argc));
+  /* INFO: Check read_proc return value to avoid using uninitialized argc. */
+  if (read_proc(pid, arg, &argc, sizeof(argc)) != (ssize_t)sizeof(argc)) {
+    LOGE("failed to read argc from remote process");
+
+    free_maps(map);
+
+    return false;
+  }
+  /* INFO: Sanity-check argc to prevent wild pointer arithmetic on argv. */
+  if (argc < 0 || argc > 65536) {
+    LOGE("implausible argc %d", argc);
+
+    free_maps(map);
+
+    return false;
+  }
   LOGV("argc %d", argc);
 
   char **envp = argv + argc + 1;
   LOGV("envp %p", (void *)envp);
 
   char **p = envp;
-  while (1) {
-    uintptr_t *buf;
-    read_proc(pid, (uintptr_t)p, &buf, sizeof(buf));
+  /* INFO: Bound the envp scan to avoid an unbounded loop if the remote
+   * process memory is corrupted and no NULL terminator is found. */
+  for (int env_i = 0; env_i < 65536; env_i++) {
+    uintptr_t *buf = NULL;
+    if (read_proc(pid, (uintptr_t)p, &buf, sizeof(buf)) != (ssize_t)sizeof(buf)) {
+      LOGE("failed to read envp[%d] from remote process", env_i);
+
+      free_maps(map);
+
+      return false;
+    }
 
     if (buf == NULL) break;
 
@@ -291,10 +323,18 @@ bool inject_on_main(int pid, const char *lib_path) {
   uintptr_t entry_addr = 0;
   uintptr_t addr_of_entry_addr = 0;
 
-  while (1) {
+  /* INFO: Bound the auxv scan to avoid an unbounded loop. */
+  for (int auxv_i = 0; auxv_i < 256; auxv_i++) {
     ElfW(auxv_t) buf;
+    memset(&buf, 0, sizeof(buf));
 
-    read_proc(pid, (uintptr_t)v, &buf, sizeof(buf));
+    if (read_proc(pid, (uintptr_t)v, &buf, sizeof(buf)) != (ssize_t)sizeof(buf)) {
+      LOGE("failed to read auxv[%d] from remote process", auxv_i);
+
+      free_maps(map);
+
+      return false;
+    }
 
     if (buf.a_type == AT_ENTRY) {
       entry_addr = (uintptr_t)buf.a_un.a_val;
@@ -315,6 +355,8 @@ bool inject_on_main(int pid, const char *lib_path) {
   if (entry_addr == 0) {
     LOGE("failed to get entry");
 
+    free_maps(map);
+
     return false;
   }
 
@@ -327,17 +369,27 @@ bool inject_on_main(int pid, const char *lib_path) {
             we set the last bit to the same as the entry address.
   */
   uintptr_t break_addr = (uintptr_t)((intptr_t)(-0x0F & ~1) | (intptr_t)((uintptr_t)entry_addr & 1));
-  if (!write_proc(pid, (uintptr_t)addr_of_entry_addr, &break_addr, sizeof(break_addr))) return false;
+  if (!write_proc(pid, (uintptr_t)addr_of_entry_addr, &break_addr, sizeof(break_addr))) {
+    free_maps(map);
+
+    return false;
+  }
 
   ptrace(PTRACE_CONT, pid, 0, 0);
 
   int status;
   wait_for_trace(pid, &status, __WALL);
   if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSEGV) {
-    if (!get_regs(pid, &regs)) return false;
+    if (!get_regs(pid, &regs)) {
+      free_maps(map);
+
+      return false;
+    }
 
     if (((int)regs.REG_IP & ~1) != ((int)break_addr & ~1)) {
       LOGE("stopped at unknown addr %p", (void *) regs.REG_IP);
+
+      free_maps(map);
 
       return false;
     }
@@ -346,13 +398,18 @@ bool inject_on_main(int pid, const char *lib_path) {
     LOGD("stopped at entry");
 
     /* INFO: Restore entry address */
-    if (!write_proc(pid, (uintptr_t) addr_of_entry_addr, &entry_addr, sizeof(entry_addr))) return false;
+    if (!write_proc(pid, (uintptr_t) addr_of_entry_addr, &entry_addr, sizeof(entry_addr))) {
+      free_maps(map);
+
+      return false;
+    }
 
     /* INFO: Backup registers */
     struct user_regs_struct backup;
     memcpy(&backup, &regs, sizeof(regs));
 
     free_maps(map);
+    map = NULL;
 
     map = parse_maps(pid_str);
     if (!map) {
@@ -361,9 +418,11 @@ bool inject_on_main(int pid, const char *lib_path) {
       return false;
     }
 
-    struct maps_info *local_map = parse_maps("self");
+    local_map = parse_maps("self");
     if (!local_map) {
       LOGE("failed to parse local maps");
+
+      free_maps(map);
 
       return false;
     }
