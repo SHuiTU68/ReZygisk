@@ -19,8 +19,12 @@ const HidingState = {
 // KernelSU/APatch. `skipModules` mirrors the skip_modules= entry in .rz_meta_cfg
 // that metamount.sh sources. `availableModules` is the live list scanned from
 // /data/adb/modules/* (excluding rezygisk itself).
+// `metaEnabled` / `mountMode` / `fakeName` mirror the other .rz_meta_cfg keys.
 const MetaMountState = {
   isEnabled: false,
+  metaEnabled: true,
+  mountMode: 'direct',
+  fakeName: 'rezygisk',
   skipModules: [],
   availableModules: []
 }
@@ -141,17 +145,40 @@ async function _loadMetaEnabled() {
   MetaMountState.isEnabled = (r.errno === 0 && /rezygisk$/.test(r.stdout.trim()))
 }
 
-// INFO: Read skip_modules from .rz_meta_cfg. Format (sourced by metamount.sh):
+// INFO: Read all metamodule config from .rz_meta_cfg. Format (sourced by
+// metamount.sh):
+//   enabled=true|false
+//   mount_mode=tmpfs|direct
+//   fake_mount_name=rezygisk
 //   skip_modules="id1 id2 id3"
-// Missing or malformed file => empty list (mount everything not skipped).
+// Missing or malformed file => defaults.
 async function _loadMetaCfg() {
   MetaMountState.skipModules = []
+  MetaMountState.metaEnabled = true
+  MetaMountState.mountMode = 'direct'
+  MetaMountState.fakeName = 'rezygisk'
   const r = await exec(`cat ${TW_META_CFG_PATH} 2>/dev/null`)
   if (r.errno !== 0) return
   r.stdout.split('\n').forEach((line) => {
-    const m = line.match(/^skip_modules="(.*)"$/)
-    if (m) {
-      MetaMountState.skipModules = m[1].split(/\s+/).filter(Boolean)
+    const sm = line.match(/^skip_modules="(.*)"$/)
+    if (sm) {
+      MetaMountState.skipModules = sm[1].split(/\s+/).filter(Boolean)
+      return
+    }
+    const em = line.match(/^enabled=(.+)$/)
+    if (em) {
+      MetaMountState.metaEnabled = em[1].trim() !== 'false'
+      return
+    }
+    const mm = line.match(/^mount_mode=(.+)$/)
+    if (mm) {
+      const v = mm[1].trim()
+      if (v === 'tmpfs' || v === 'direct') MetaMountState.mountMode = v
+      return
+    }
+    const fm = line.match(/^fake_mount_name=(.+)$/)
+    if (fm) {
+      MetaMountState.fakeName = fm[1].trim() || 'rezygisk'
     }
   })
 }
@@ -178,12 +205,71 @@ async function _loadAvailableModules() {
   }
 }
 
-// INFO: Persist skip_modules to .rz_meta_cfg. Module IDs are alphanumeric by
-// convention, so the simple sourced form is safe. The file is read by
-// metamount.sh on every boot, so writes take effect on next reboot.
+// INFO: Persist all metamodule config to .rz_meta_cfg. The file is sourced by
+// metamount.sh on every boot, so writes take effect on next reboot. We use a
+// quoted heredoc delimiter so shell doesn't expand $ in the content — the JS
+// template literal already substituted the values before the command runs.
 function _writeMetaCfg() {
   const skipList = MetaMountState.skipModules.filter(Boolean).join(' ')
-  return exec(`mkdir -p /data/adb/rezygisk && echo 'skip_modules="${skipList}"' > ${TW_META_CFG_PATH}`)
+  const enabled = MetaMountState.metaEnabled ? 'true' : 'false'
+  const mode = MetaMountState.mountMode
+  const name = (MetaMountState.fakeName || 'rezygisk').replace(/[^A-Za-z0-9_]/g, '') || 'rezygisk'
+  return exec(`mkdir -p /data/adb/rezygisk && cat > ${TW_META_CFG_PATH} <<'RZMETACFG'
+enabled=${enabled}
+mount_mode=${mode}
+fake_mount_name=${name}
+skip_modules="${skipList}"
+RZMETACFG`)
+}
+
+// INFO: Sync the meta settings controls (enable switch, mode select, name
+// input) from MetaMountState. Called after loading config and after rendering.
+function _syncMetaSettings() {
+  const settingsEl = document.getElementById('tw_meta_settings')
+  const enabledSwitch = document.getElementById('tw_meta_enabled_switch')
+  const modeSelect = document.getElementById('tw_meta_mode_select')
+  const nameInput = document.getElementById('tw_meta_fake_name_input')
+
+  if (settingsEl) settingsEl.style.display = MetaMountState.isEnabled ? 'block' : 'none'
+  if (enabledSwitch) enabledSwitch.checked = MetaMountState.metaEnabled
+  if (modeSelect) modeSelect.value = MetaMountState.mountMode
+  if (nameInput) nameInput.value = MetaMountState.fakeName
+}
+
+// INFO: Wire up change listeners for the settings controls. Called once during
+// load(). Each change updates MetaMountState and persists immediately.
+function _setupMetaSettingsListeners() {
+  const enabledSwitch = document.getElementById('tw_meta_enabled_switch')
+  const modeSelect = document.getElementById('tw_meta_mode_select')
+  const nameInput = document.getElementById('tw_meta_fake_name_input')
+
+  if (enabledSwitch) {
+    enabledSwitch.addEventListener('change', () => {
+      MetaMountState.metaEnabled = enabledSwitch.checked
+      _writeMetaCfg()
+    })
+  }
+  if (modeSelect) {
+    modeSelect.addEventListener('change', () => {
+      MetaMountState.mountMode = modeSelect.value
+      _writeMetaCfg()
+    })
+  }
+  if (nameInput) {
+    // INFO: Debounce text input — only persist on blur or Enter to avoid
+    // writing the config file on every keystroke.
+    nameInput.addEventListener('change', () => {
+      MetaMountState.fakeName = nameInput.value.trim() || 'rezygisk'
+      nameInput.value = MetaMountState.fakeName
+      _writeMetaCfg()
+    })
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        nameInput.blur()
+      }
+    })
+  }
 }
 
 // INFO: Build the exclusion list DOM. A checked checkbox means the module IS
@@ -196,6 +282,10 @@ function _renderModuleList() {
   if (!listEl) return
 
   if (notActiveEl) notActiveEl.style.display = MetaMountState.isEnabled ? 'none' : 'block'
+
+  // INFO: Show/hide the settings panel (switch, mode, name) based on whether
+  // Hrezygisk is the active metamodule.
+  _syncMetaSettings()
 
   listEl.innerHTML = ''
 
@@ -261,4 +351,5 @@ export async function load() {
   await _loadMetaCfg()
   await _loadAvailableModules()
   _renderModuleList()
+  _setupMetaSettingsListeners()
 }

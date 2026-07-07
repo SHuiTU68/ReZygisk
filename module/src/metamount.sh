@@ -3,11 +3,22 @@
 # Hrezygisk metamodule mount handler.
 #
 # Runs at the end of the post-fs-data stage (after all post-fs-data.sh scripts)
-# and mounts every enabled module's system/ tree systemlessly via overlayfs.
+# and mounts every enabled module's system/ tree systemlessly.
 #
 # Only KernelSU and APatch drive the metamodule hooks; on Magisk this file is
 # never invoked (Magisk ignores metamodule=1 in module.prop), so Hrezygisk
 # falls back to being a regular module there.
+#
+# Two mount backends are supported (no ext4 — that creates detectable device
+# nodes on /proc/fs, see mountify's rationale):
+#
+#   direct — overlay upperdir/workdir live on /data (ext4/f2fs). Simple and
+#            persistent, but the upperdir path is on a detectable filesystem.
+#
+#   tmpfs — inspired by mountify: stage module contents onto a tmpfs-backed
+#           /mnt/vendor/<fake_name>, then overlay each partition using the
+#           tmpfs path as upperdir. No ext4 nodes are created on /data and
+#           the staged path mimics an OEM mount like /mnt/vendor/my_bigball.
 #
 # The overlay source is set to "KSU" or "APatch" so that zygiskd's umount_root()
 # can identify and detach these mounts for denylist apps (the source-name match
@@ -41,15 +52,27 @@ else
 fi
 
 # INFO: Read user configuration. Format (sourced):
-#   skip_modules="id1 id2 id3"
-# Missing file => no exclusions.
+#   enabled=true|false          (default: true)
+#   mount_mode=tmpfs|direct     (default: direct)
+#   fake_mount_name=rezygisk    (default: rezygisk; only used in tmpfs mode)
+#   skip_modules="id1 id2 id3"  (default: empty)
+# Missing file => defaults.
+ENABLED=true
+MOUNT_MODE=direct
+FAKE_MOUNT_NAME=rezygisk
 SKIP_MODULES=""
 if [ -f "$CFG" ]; then
   # shellcheck disable=SC1090
   . "$CFG"
 fi
 
-_meta_log "metamount start: SOURCE=$SOURCE skip_modules=[$SKIP_MODULES]"
+# INFO: If the user disabled metamount via config, do nothing.
+if [ "$ENABLED" != "true" ]; then
+  _meta_log "metamount disabled by config (enabled=$ENABLED), exiting"
+  exit 0
+fi
+
+_meta_log "metamount start: SOURCE=$SOURCE mode=$MOUNT_MODE fake_name=$FAKE_MOUNT_NAME skip=[$SKIP_MODULES]"
 
 # INFO: Decide whether a module directory should be mounted. Returns 0 to
 # mount, 1 to skip. A module is skipped if it is disabled, marked skip_mount,
@@ -89,6 +112,23 @@ done
 
 _meta_log "partitions discovered:[$PARTITIONS]"
 
+# INFO: Prepare the staging area for tmpfs mode. We mount a tmpfs at
+# /mnt/vendor/<fake_mount_name> and use it to hold both the merged upperdirs
+# and the overlay workdirs. This avoids creating any files on /data's ext4/f2fs
+# filesystem, making the mount harder to detect via /proc/fs ext4 node scans.
+STAGE=""
+if [ "$MOUNT_MODE" = "tmpfs" ]; then
+  STAGE="/mnt/vendor/$FAKE_MOUNT_NAME"
+  mkdir -p "$STAGE" 2>/dev/null
+  if ! mount -t tmpfs tmpfs "$STAGE" 2>/dev/null; then
+    _meta_log "FAIL: cannot mount tmpfs at $STAGE, falling back to direct mode"
+    MOUNT_MODE=direct
+    STAGE=""
+  else
+    _meta_log "tmpfs staged at $STAGE"
+  fi
+fi
+
 # INFO: For each partition: merge every module's contribution into a single
 # upperdir, then mount one overlay over the live partition. Later modules
 # (alphabetical order) overwrite earlier ones on conflict — this matches the
@@ -100,8 +140,14 @@ for P in $PARTITIONS; do
     continue
   fi
 
-  upper="$RW_BASE/$P/upper"
-  work="$RW_BASE/$P/work"
+  if [ "$MOUNT_MODE" = "tmpfs" ] && [ -n "$STAGE" ]; then
+    upper="$STAGE/$P"
+    work="$STAGE/.work/$P"
+  else
+    upper="$RW_BASE/$P/upper"
+    work="$RW_BASE/$P/work"
+  fi
+
   mkdir -p "$upper" "$work" 2>/dev/null || {
     _meta_log "FAIL $P: cannot create upper/work dir"
     continue
@@ -109,7 +155,8 @@ for P in $PARTITIONS; do
 
   # INFO: Wipe the upperdir so a previous boot's stale contents (e.g. a module
   # that has since been removed) don't linger. upperdir is rebuilt from scratch
-  # every boot from the current module set.
+  # every boot from the current module set. In tmpfs mode the staging area is
+  # already empty (fresh tmpfs mount), so this is a no-op there.
   rm -rf "$upper"/* 2>/dev/null
 
   for mod in /data/adb/modules/*; do
@@ -126,7 +173,7 @@ for P in $PARTITIONS; do
   # INFO: The device argument ("$SOURCE") becomes the mount source recorded in
   # /proc/self/mountinfo. umount_root() matches on this exact string.
   if mount -t overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$SOURCE" "$lower" 2>/dev/null; then
-    _meta_log "mounted overlay on $lower (source=$SOURCE)"
+    _meta_log "mounted overlay on $lower (source=$SOURCE mode=$MOUNT_MODE upper=$upper)"
   else
     # INFO: Overlay mount can fail if the kernel rejects stacking an overlay on
     # top of certain filesystems, or if the partition is already an overlay.

@@ -81,7 +81,25 @@
         "description": "Choose which modules should NOT be mounted by Hrezygisk's metamodule. Only active on KernelSU/APatch.",
         "note": "Changes take effect on next reboot.",
         "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
-        "noModules": "No other modules installed."
+        "noModules": "No other modules installed.",
+        "settings": {
+          "title": "Meta Mount Settings",
+          "enabled": {
+            "title": "Enable Meta Mount",
+            "description": "Toggle metamodule mount on/off. When off, modules are not mounted by Hrezygisk."
+          },
+          "mountMode": {
+            "title": "Mount Mode",
+            "description": "tmpfs: stage on /mnt/vendor/<name> (harder to detect). direct: upperdir on /data (simpler). No ext4.",
+            "tmpfs": "tmpfs",
+            "direct": "direct"
+          },
+          "fakeName": {
+            "title": "Fake Mount Name",
+            "description": "Custom name for the tmpfs staging point (/mnt/vendor/<name>). Only used in tmpfs mode.",
+            "placeholder": "rezygisk"
+          }
+        }
       }
     },
     "modules": {

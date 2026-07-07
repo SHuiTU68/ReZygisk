@@ -111,6 +111,74 @@ if [ -L /data/adb/metamodule ]; then
   esac
 fi
 
+# INFO: Interactive metamodule configuration (KernelSU/APatch only).
+# On Magisk the metamodule hooks are never invoked, so we skip this entirely.
+# The KSU/APatch manager app provides an interactive console for customize.sh,
+# so `read` works there. If read times out or hits EOF (non-interactive flash),
+# sensible defaults are used. All settings can be changed later via WebUI.
+META_ENABLED=true
+META_MOUNT_MODE=direct
+META_FAKE_NAME=rezygisk
+
+if [ "$KSU" ] || [ "$APATCH" ]; then
+  ui_print "*********************************************************"
+  ui_print " Metamodule Configuration"
+  ui_print "*********************************************************"
+
+  # INFO: Q1 — Enable metamount?
+  ui_print "- Enable metamodule mount? (Y/n)"
+  ui_print "  Enter = Yes (default), type n = No"
+  _ans=""
+  read -r -t 15 _ans 2>/dev/null || _ans=""
+  case "$_ans" in
+    [Nn]*) META_ENABLED=false; ui_print "  -> Disabled";;
+    *) META_ENABLED=true; ui_print "  -> Enabled";;
+  esac
+
+  if [ "$META_ENABLED" = "true" ]; then
+    # INFO: Q2 — Mount mode (tmpfs vs direct). No ext4 option by design.
+    ui_print "- Mount mode:"
+    ui_print "  1 = tmpfs  (stage on /mnt/vendor/<name>, harder to detect)"
+    ui_print "  2 = direct (upperdir on /data, simpler) [default]"
+    ui_print "  Enter = direct (default)"
+    _ans=""
+    read -r -t 15 _ans 2>/dev/null || _ans=""
+    case "$_ans" in
+      1) META_MOUNT_MODE=tmpfs; ui_print "  -> tmpfs";;
+      *) META_MOUNT_MODE=direct; ui_print "  -> direct";;
+    esac
+
+    # INFO: Q3 — Custom fake mount name (only relevant for tmpfs mode, but we
+    # always ask so the user can switch modes via WebUI without reconfiguring).
+    ui_print "- Fake mount name for tmpfs mode (default: rezygisk)"
+    ui_print "  This becomes /mnt/vendor/<name> in tmpfs mode."
+    ui_print "  Enter = rezygisk (default)"
+    _ans=""
+    read -r -t 15 _ans 2>/dev/null || _ans=""
+    if [ -n "$_ans" ]; then
+      # Sanitize: only allow alphanumerics and underscore
+      _clean=$(printf '%s' "$_ans" | tr -cd 'A-Za-z0-9_')
+      if [ -n "$_clean" ]; then
+        META_FAKE_NAME="$_clean"
+      fi
+    fi
+    ui_print "  -> $META_FAKE_NAME"
+  fi
+
+  ui_print "*********************************************************"
+  ui_print " You can change these later via WebUI > Hiding"
+  ui_print "*********************************************************"
+
+  # INFO: Persist the configuration so metamount.sh can source it on next boot.
+  mkdir -p /data/adb/rezygisk
+  cat > /data/adb/rezygisk/.rz_meta_cfg <<METACFG
+enabled=$META_ENABLED
+mount_mode=$META_MOUNT_MODE
+fake_mount_name=$META_FAKE_NAME
+skip_modules=""
+METACFG
+fi
+
 ui_print "- Extracting module files"
 extract "$ZIPFILE" 'module.prop'     "$MODPATH"
 extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"
