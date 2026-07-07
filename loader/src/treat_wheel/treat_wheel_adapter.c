@@ -119,19 +119,6 @@ void tw_adapter_pre_specialize(JNIEnv *env, const char *process_name, uint32_t f
       tw_do_frida_hiding(NULL, env);
     }
   }
-
-  /* INFO: ReVanced mounts umount runs for both denylist and non-denylist
-   *       depending on inversion setting. Simplified: run if not disabled. */
-  if (!g_tw_state.disable_revanced_mounts_umount) {
-    /* TODO: Requires companion daemon for full RVU support.
-     *       For built-in mode, this is currently a no-op placeholder. */
-    LOGD("Treat Wheel: RVU requested but companion daemon not available in built-in mode.");
-  }
-
-  /* INFO: Custom font loading also requires companion daemon */
-  if (!g_tw_state.disable_custom_font_loading) {
-    LOGD("Treat Wheel: Custom font loading requested but companion daemon not available in built-in mode.");
-  }
 }
 
 void tw_adapter_atexit_cleanup(JNIEnv *env, uint32_t flags) {
@@ -161,8 +148,6 @@ bool tw_adapter_is_enabled(const char *feature) {
   if (strcmp(feature, "gsi_hiding") == 0) return !g_tw_state.disable_gsi_hiding;
   if (strcmp(feature, "zygote_mountinfo_leak_fixing") == 0) return !g_tw_state.disable_zygote_mountinfo_leak_fixing;
   if (strcmp(feature, "maps_hiding") == 0) return !g_tw_state.disable_maps_hiding;
-  if (strcmp(feature, "revanced_mounts_umount") == 0) return !g_tw_state.disable_revanced_mounts_umount;
-  if (strcmp(feature, "custom_font_loading") == 0) return !g_tw_state.disable_custom_font_loading;
   if (strcmp(feature, "denylist_logic_inversion") == 0) return !g_tw_state.disable_denylist_logic_inversion;
   if (strcmp(feature, "module_loading_traces_hiding") == 0) return !g_tw_state.disable_module_loading_traces_hiding;
   if (strcmp(feature, "frida_traces_hiding") == 0) return !g_tw_state.disable_frida_traces_hiding;

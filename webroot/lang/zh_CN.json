@@ -53,14 +53,6 @@
           "title": "Maps 隐藏",
           "description": "从 /proc/self/maps 中隐藏模块痕迹。"
         },
-        "ReVancedModuleMountsHiding": {
-          "title": "ReVanced 挂载卸载",
-          "description": "卸载 ReVanced 模块挂载（需要 companion）。"
-        },
-        "customFontLoading": {
-          "title": "自定义字体加载",
-          "description": "通过 Treat Wheel 加载自定义字体（需要 companion）。"
-        },
         "denylistLogicInversion": {
           "title": "黑名单逻辑反转",
           "description": "反转黑名单行为：黑名单应用获得干净的命名空间。"
