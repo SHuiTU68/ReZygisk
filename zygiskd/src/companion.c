@@ -70,7 +70,10 @@ void *entry_thread(void *arg) {
   */
   struct stat st1;
   if (fstat(fd, &st1) != -1 && st0.st_ino == st1.st_ino) {
-    LOGI(" - Client fd changed after module entry");
+    /* INFO: The fd's inode is unchanged, meaning the module companion did
+     * NOT close it. We close it here to avoid an fd leak. (The previous log
+     * message said "changed" which was misleading — it's actually unchanged.) */
+    LOGI(" - Client fd unchanged after module entry, closing it");
 
     close(fd);
   }

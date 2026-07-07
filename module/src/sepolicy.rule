@@ -1,26 +1,135 @@
+# =============================================================================
+# Hrezygisk SELinux Policy Rules
+#
+# Design principles:
+#   1. Least privilege - only grant permissions actually needed
+#   2. Never use wildcard (*) permissions; enumerate specific classes
+#   3. Comment each rule with the code path that requires it
+#   4. Separate zygote (injection target) from daemon (zygiskd) rules
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Type declaration: zygisk_file for sockets, data, and binaries
+# -----------------------------------------------------------------------------
 type zygisk_file file_type
 typeattribute zygisk_file mlstrustedobject
-allow zygote zygisk_file sock_file {read write}
 
-allow zygote magisk lnk_file read
-allow zygote unlabeled file {read open}
+# -----------------------------------------------------------------------------
+# Zygote -> daemon socket communication
+#   - zygote connects to /data/adb/rezygisk/cpXX.sock (zygisk_file sock_file)
+#   - Code: loader/src/common/daemon.c rezygiskd_connect()
+# -----------------------------------------------------------------------------
+allow zygote zygisk_file sock_file { read write }
+allow zygote zygisk_file dir { search write add_name remove_name }
+allow zygote zygisk_file file { read write open getattr create unlink }
+
+# -----------------------------------------------------------------------------
+# Zygote -> root impl data directories (setns to zygote's mnt ns)
+#   - KernelSU: /data/adb/ksu/ (ksu context)
+#   - APatch:   /data/adb/ap/  (apd/su context)
+#   - Magisk:   /data/adb/magisk/ (magisk context)
+#   - Code: zygiskd/src/utils.c switch_mount_namespace()
+# -----------------------------------------------------------------------------
+allow zygote su dir search
+allow zygote su { lnk_file file } read
+# INFO: KernelSU renamed su context to ksu
+allow zygote ksu dir search
+allow zygote ksu { lnk_file file } read
+
+# -----------------------------------------------------------------------------
+# Zygote -> /data/adb (modules dir, rezygisk data, ksud binary)
+#   - Read module .so libraries from /data/adb/modules/*/zygisk/
+#   - Read/write /data/adb/rezygisk/ (state, sockets)
+#   - Code: zygiskd/src/zygiskd.c load_modules(), loader hook paths
+# -----------------------------------------------------------------------------
+allow zygote adb_data_file dir { search read getattr open }
+# INFO: Only read/open/getattr on files - NOT write. zygote reads module libs.
+allow zygote adb_data_file file { read open getattr }
+
+# -----------------------------------------------------------------------------
+# Zygote -> /proc (namespace fd, mountinfo, maps)
+#   - /proc/<pid>/ns/mnt for setns
+#   - /proc/self/maps, /proc/self/mounts, /proc/<pid>/mountinfo
+#   - /proc/thread-self/attr/sockcreate for socket context
+#   - Code: zygiskd/src/utils.c switch_mount_namespace(), set_socket_create_context()
+#          treat_wheel/utils.c tw_parse_maps(), tw_parse_mountinfo()
+# -----------------------------------------------------------------------------
+allow zygote proc file { read open }
+allow zygote proc dir search
+allow zygote nsfs file { read open }
+allow zygote proc dir { read open }  # for /proc/self/fd readdir
+
+# -----------------------------------------------------------------------------
+# Zygote -> tmpfs (mount namespace operations, tmpfs bind for hiding)
+#   - Bind mount tmpfs over mount points that can't be umounted
+#   - Code: zygiskd/src/utils.c umount_root() bind mount fallback
+#   - Limited to { mount read write } instead of * for security
+# -----------------------------------------------------------------------------
+allow zygote tmpfs filesystem { mount unmount }
+allow zygote tmpfs file { read write getattr mount }
+
+# -----------------------------------------------------------------------------
+# Zygote -> app tmpfs (denylist processes may need tmpfs operations)
+#   - When reverting mounts for denylist apps, tmpfs is used as cover
+#   - Code: loader/src/injector/hook.c update_mnt_ns(), zygiskd/utils.c
+# -----------------------------------------------------------------------------
+allow zygote appdomain_tmpfs file { read write mount }
+
+# -----------------------------------------------------------------------------
+# Zygote capabilities
+#   - sys_chroot: needed by Tango zygote injection path
+#   - Code: loader injection path
+# -----------------------------------------------------------------------------
 allow zygote zygote capability sys_chroot
 
-# INFO: To allow to setns on the Zygote's child mns
-allow zygote su dir search
-allow zygote su {lnk_file file} read
-# INFO: Same as above. KernelSU renamed su context to ksu
-allow zygote ksu dir search
-allow zygote ksu {lnk_file file} read
-
-allow zygote adb_data_file dir search
-allow zygote adb_data_file file *
-allow zygote proc file {read open}
-allow zygote nsfs file {read open}
+# -----------------------------------------------------------------------------
+# Zygote execmem (PLT hook trampolines, mprotect for code injection)
+#   - Code: loader/src/injector/hook.c PLT hook installation
+#          treat_wheel/hiding.c mprotect for maps hiding
+# -----------------------------------------------------------------------------
 allow zygote zygote process execmem
 allow system_server system_server process execmem
-allow zygote tmpfs file *
-allow zygote appdomain_tmpfs file *
 
-# INFO: Needed for Tango Zygote
+# -----------------------------------------------------------------------------
+# Zygote -> system lib (Tango zygote needs execmod on system libs)
+#   - Code: ptracer injection path
+# -----------------------------------------------------------------------------
 allow zygote system_lib_file file execmod
+
+# -----------------------------------------------------------------------------
+# Zygote -> magisk (read magisk binary for root impl detection)
+#   - Code: zygiskd/src/root_impl/magisk.c magisk_get_existence()
+# -----------------------------------------------------------------------------
+allow zygote magisk file { read open getattr }
+allow zygote magisk lnk_file read
+
+# -----------------------------------------------------------------------------
+# Zygote -> unlabeled (some mount points have no label after umount)
+#   - Limited to read/open for mountinfo parsing
+#   - Code: zygiskd/src/utils.c parse_mountinfo() on reverted mounts
+# -----------------------------------------------------------------------------
+allow zygote unlabeled file { read open }
+allow zygote unlabeled dir search
+
+# -----------------------------------------------------------------------------
+# Zygote -> rootfs/system mounts (umount and bind for denylist)
+#   - Needed to detach and re-mount overlays for denylist processes
+#   - Code: zygiskd/src/utils.c umount_root()
+# -----------------------------------------------------------------------------
+allow zygote rootfs filesystem { mount unmount }
+allow zygote system_file filesystem { mount unmount }
+allow zygote vendor_file filesystem { mount unmount }
+allow zygote product_file filesystem { mount unmount }
+
+# -----------------------------------------------------------------------------
+# Zygote -> system_data_file (read /data/system/packages.list for KSU manager)
+#   - Code: zygiskd/src/root_impl/kernelsu.c ksu_discover_manager_uid()
+# -----------------------------------------------------------------------------
+allow zygote system_data_file file { read open getattr }
+allow zygote system_data_file dir search
+
+# -----------------------------------------------------------------------------
+# Zygote -> ksud binary (verify ksud connectivity)
+#   - Code: zygiskd/src/root_impl/kernelsu.c ksu_verify_ksud()
+# -----------------------------------------------------------------------------
+allow zygote ksu_exec file { read open getattr execute }

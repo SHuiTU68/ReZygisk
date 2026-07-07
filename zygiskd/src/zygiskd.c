@@ -111,6 +111,21 @@ static void load_modules(struct Context *restrict context) {
 
       close(lib_fd);
 
+      /* INFO: Clean up all previously loaded modules and the dir fd, matching
+       * the realloc-failure cleanup path above. Without this, the opendir fd
+       * leaks and previously loaded modules' resources are orphaned. */
+      for (size_t i = 0; i < context->len; i++) {
+        free(context->modules[i].name);
+        if (context->modules[i].companion >= 0) close(context->modules[i].companion);
+        if (context->modules[i].lib_fd >= 0) close(context->modules[i].lib_fd);
+      }
+
+      free(context->modules);
+      context->modules = NULL;
+      context->len = 0;
+
+      closedir(dir);
+
       return;
     }
 
@@ -577,16 +592,36 @@ void zygiskd_start(char *restrict argv[]) {
           break;
         }
 
+        /* INFO: write_fd duplicates the fd to the receiver via SCM_RIGHTS,
+         * but the sender's copy is NOT auto-closed by the kernel. Closing
+         * it here prevents fd exhaustion on this long-running daemon. */
+        close(fd);
+
         break;
       }
       case UpdateMountNamespace: {
-        pid_t pid = 0;
-        ssize_t ret = read_uint32_t(client_fd, (uint32_t *)&pid);
-        ASSURE_SIZE_READ("UpdateMountNamespace", "pid", ret, sizeof(pid), break);
+        /* INFO: Read pid as uint32_t first to avoid strict-aliasing UB from
+         * casting pid_t* to uint32_t*, then convert explicitly. */
+        uint32_t raw_pid = 0;
+        ssize_t ret = read_uint32_t(client_fd, &raw_pid);
+        ASSURE_SIZE_READ("UpdateMountNamespace", "pid", ret, sizeof(raw_pid), break);
+        pid_t pid = (pid_t)raw_pid;
 
         uint8_t mns_state = 0;
         ret = read_uint8_t(client_fd, &mns_state);
         ASSURE_SIZE_READ("UpdateMountNamespace", "mns_state", ret, sizeof(mns_state), break);
+
+        /* INFO: Validate mns_state to prevent fd leaks. An invalid value
+         * (not Clean or Mounted) would cause save_mns_fd to fork a process
+         * and open an ns fd that is never stored or closed. */
+        if (mns_state != Clean && mns_state != Mounted) {
+          LOGE("Invalid mount namespace state: %u", mns_state);
+
+          ret = write_uint32_t(client_fd, (uint32_t)0);
+          ASSURE_SIZE_WRITE("UpdateMountNamespace", "ns_fd", ret, sizeof(uint32_t), break);
+
+          break;
+        }
 
         uint32_t our_pid = (uint32_t)getpid();
         ret = write_uint32_t(client_fd, our_pid);

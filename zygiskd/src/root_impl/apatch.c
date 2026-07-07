@@ -35,7 +35,7 @@ void apatch_get_existence(struct root_impl_state *state) {
     return;
   }
 
-  char apatch_version[32];
+  char apatch_version[32] = { 0 };
   const char *const argv[] = { "apd", "-V", NULL };
 
   if (!exec_command(apatch_version, sizeof(apatch_version), "/data/adb/apd", argv)) {
@@ -46,7 +46,21 @@ void apatch_get_existence(struct root_impl_state *state) {
     return;
   }
 
-  int version = atoi(apatch_version + strlen("apd "));
+  /* INFO: Verify the output starts with "apd " prefix before offsetting.
+   * exec_command can return true with an empty/short buffer on read failure,
+   * which would cause atoi() to read uninitialized stack memory. */
+  static const char apd_prefix[] = "apd ";
+  size_t prefix_len = sizeof(apd_prefix) - 1;
+  if (strlen(apatch_version) < prefix_len ||
+      strncmp(apatch_version, apd_prefix, prefix_len) != 0) {
+    LOGE("Unexpected apd output: \"%s\"", apatch_version);
+
+    state->state = Abnormal;
+
+    return;
+  }
+
+  int version = atoi(apatch_version + prefix_len);
 
   if (version == 0) state->state = Abnormal;
   else if (version >= MIN_APATCH_VERSION && version <= 999999) state->state = Supported;
@@ -187,9 +201,18 @@ bool apatch_uid_should_umount(uid_t uid, const char *const process) {
 
     for (size_t i = 0; i < config.size; i++) {
       size_t config_process_length = strlen(config.configs[i].process);
-      size_t smallest_process_length = targeted_process_length < config_process_length ? targeted_process_length : config_process_length;
 
-      if (strncmp(config.configs[i].process, process, smallest_process_length) != 0) continue;
+      /* INFO: Match the config process name as a prefix of the target process
+       * name, and verify the next character is ':' (isolated service suffix
+       * separator) or '\0' (exact match). Using the shorter length as the
+       * comparison bound (previous behavior) was too permissive: a config
+       * entry "com" would match "com.evil:isolated", and "com.app" would
+       * match "com.apple:isolated". */
+      if (targeted_process_length < config_process_length) continue;
+      if (strncmp(process, config.configs[i].process, config_process_length) != 0) continue;
+
+      char next_char = process[config_process_length];
+      if (next_char != ':' && next_char != '\0') continue;
 
       /* INFO: This allow us to copy the information to avoid use-after-free */
       bool umount_needed = config.configs[i].umount_needed;
@@ -205,15 +228,35 @@ bool apatch_uid_should_umount(uid_t uid, const char *const process) {
   return false;
 }
 
+/* INFO: Cache for APatch manager uid - the manager package rarely changes,
+ * so we cache the result permanently to avoid a stat() syscall per app fork. */
+static bool apatch_manager_uid_cached = false;
+static uid_t apatch_cached_manager_uid = (uid_t)-1;
+
 bool apatch_uid_is_manager(uid_t uid) {
-  struct stat st;
-  if (stat("/data/user_de/0/me.bmax.apatch", &st) == -1) {
-    if (errno != ENOENT) {
-      LOGE("Failed to stat APatch manager data directory: %s", strerror(errno));
+  if (!apatch_manager_uid_cached) {
+    struct stat st;
+    if (stat("/data/user_de/0/me.bmax.apatch", &st) == -1) {
+      if (errno != ENOENT) {
+        LOGE("Failed to stat APatch manager data directory: %s", strerror(errno));
+      }
+
+      /* INFO: Cache the "not found" result too, but allow retry by not
+       * setting apatch_manager_uid_cached if it's ENOENT (manager not
+       * installed yet). Only cache permanent failures. */
+      if (errno == ENOENT) {
+        apatch_cached_manager_uid = (uid_t)-1;
+        apatch_manager_uid_cached = true;
+      }
+
+      return false;
     }
 
-    return false;
+    apatch_cached_manager_uid = st.st_uid;
+    apatch_manager_uid_cached = true;
   }
 
-  return st.st_uid == uid;
+  if (apatch_cached_manager_uid == (uid_t)-1) return false;
+
+  return uid == apatch_cached_manager_uid;
 }

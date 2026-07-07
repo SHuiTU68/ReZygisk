@@ -14,6 +14,18 @@ void entry(void *addr, size_t size, int tango_flag) {
   start_addr = addr;
   block_size = size;
 
+  /* INFO: Connect to the daemon BEFORE installing hooks. If the daemon is not
+   * running, we avoid leaving the zygote in a half-hooked state where PLT
+   * hooks are installed but no daemon coordinates them — such a state would
+   * cause hook callbacks to reference uninitialized data or attempt to
+   * connect to a non-existent daemon, risking zygote crashes and creating
+   * a detectable Zygisk fingerprint. */
+  if (!rezygiskd_zygote_injected()) {
+    LOGE("ReZygiskd is not running, skipping hook installation");
+
+    return;
+  }
+
   LOGD("start plt hooking");
   hook_functions();
 
@@ -25,12 +37,6 @@ void entry(void *addr, size_t size, int tango_flag) {
     LOGD("Supported kernel version %d.%d.%d, sending seccomp event", version.major, version.minor, version.patch);
 
     perform_ptrace_message_clear();
-  }
-
-  if (!rezygiskd_zygote_injected()) {
-    LOGE("ReZygiskd is not running");
-
-    return;
   }
 
   LOGD("Zygisk library execution done, addr: %p, size: %zu", addr, size);

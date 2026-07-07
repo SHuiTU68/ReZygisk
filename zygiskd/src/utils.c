@@ -262,9 +262,17 @@ int read_fd(int fd) {
     .msg_controllen = sizeof(cmsgbuf)
   };
 
-  ssize_t ret = recvmsg(fd, &msg, MSG_WAITALL);
+  /* INFO: Use TEMP_FAILURE_RETRY to handle EINTR from signals, matching the
+   * loader-side implementation in socket_utils.c. */
+  ssize_t ret = TEMP_FAILURE_RETRY(recvmsg(fd, &msg, MSG_WAITALL));
   if (ret == -1) {
     LOGE("recvmsg: %s", strerror(errno));
+
+    return -1;
+  }
+  if (ret == 0) {
+    /* INFO: Peer closed the connection. */
+    LOGE("recvmsg: peer closed connection");
 
     return -1;
   }
@@ -468,6 +476,10 @@ int non_blocking_execv(const char *restrict file, char *const argv[]) {
 
   if ((pid = fork()) == -1) {
     LOGE("fork: %s", strerror(errno));
+
+    /* INFO: Close pipe fds to avoid fd leak on fork failure. */
+    close(link[0]);
+    close(link[1]);
 
     return -1;
   }
@@ -930,6 +942,10 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state, struct root_impl im
 
     close(socket_parent);
 
+    /* INFO: Reap the forked child to avoid a zombie process on this
+     * long-running daemon. Every early-return must waitpid(fork_pid). */
+    waitpid(fork_pid, NULL, 0);
+
     return -1;
   }
 
@@ -937,6 +953,8 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state, struct root_impl im
     LOGE("Failed to umount root");
 
     close(socket_parent);
+
+    waitpid(fork_pid, NULL, 0);
 
     return -1;
   }
@@ -950,6 +968,8 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state, struct root_impl im
 
     close(socket_parent);
 
+    waitpid(fork_pid, NULL, 0);
+
     return -1;
   }
 
@@ -960,6 +980,8 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state, struct root_impl im
     close(ns_fd);
     close(socket_parent);
 
+    waitpid(fork_pid, NULL, 0);
+
     return -1;
   }
 
@@ -967,6 +989,8 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state, struct root_impl im
     LOGE("Failed to close socket_parent: %s", strerror(errno));
 
     close(ns_fd);
+
+    waitpid(fork_pid, NULL, 0);
 
     return -1;
   }
