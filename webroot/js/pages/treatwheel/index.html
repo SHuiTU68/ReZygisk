@@ -86,6 +86,29 @@
       </div>
     </div>
 
+    <div class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px;">
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{metaMount.title}}</div>
+          <div class="dimc desc action_card_description">{{metaMount.description}}</div>
+        </div>
+      </div>
+
+      <div id="tw_meta_not_active" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0 10px; display: none;">
+        {{metaMount.notActive}}
+      </div>
+
+      <div id="tw_meta_no_modules" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0; display: none;">
+        {{metaMount.noModules}}
+      </div>
+
+      <div id="tw_meta_module_list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+
+      <div class="dimc" style="font-size: 0.8em; color: var(--text-secondary); padding-top: 10px;">
+        {{metaMount.note}}
+      </div>
+    </div>
+
     <div class="dimc" style="padding: 15px 22px 20px; font-size: 0.85em; color: var(--text-secondary);">
       {{description.note}}
     </div>

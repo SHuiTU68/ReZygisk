@@ -92,12 +92,37 @@ if [ "$KSU" ]; then
   fi
 fi
 
+# INFO: KernelSU/APatch enforce a single-metamodule constraint at the framework
+# level, but check here too for a clearer error message and for any fork that
+# may not enforce it. /data/adb/metamodule is a symlink to the active
+# metamodule's directory; if it points somewhere other than rezygisk, abort.
+if [ -L /data/adb/metamodule ]; then
+  meta_target=$(readlink /data/adb/metamodule 2>/dev/null)
+  case "$meta_target" in
+    */rezygisk) : ;;  # upgrading ourselves, allow
+    *)
+      ui_print "*********************************************************"
+      ui_print "! Another metamodule is already installed:"
+      ui_print "!   $meta_target"
+      ui_print "! Only one metamodule can be active at a time."
+      ui_print "! Uninstall it first, reboot, then install Hrezygisk."
+      abort    "*********************************************************"
+      ;;
+  esac
+fi
+
 ui_print "- Extracting module files"
 extract "$ZIPFILE" 'module.prop'     "$MODPATH"
 extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"
 extract "$ZIPFILE" 'service.sh'      "$MODPATH"
 extract "$ZIPFILE" 'uninstall.sh'    "$MODPATH"
+extract "$ZIPFILE" 'metamount.sh'     "$MODPATH"
+extract "$ZIPFILE" 'metainstall.sh'   "$MODPATH"
+extract "$ZIPFILE" 'metauninstall.sh' "$MODPATH"
 extract "$ZIPFILE" 'rezygisk.sh' "/data/adb/post-fs-data.d/"
+
+# INFO: Metamodule hooks must be executable so KernelSU/APatch can invoke them.
+chmod +x "$MODPATH/metamount.sh" "$MODPATH/metainstall.sh" "$MODPATH/metauninstall.sh"
 
 # INFO: KernelSU 2.x.x and below runs post-fs-data.d before mounting
 #         the modules. This disallows us to clean our own module.prop.

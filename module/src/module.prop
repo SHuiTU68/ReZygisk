@@ -5,3 +5,4 @@ versionCode=${versionCode}
 author=The PerformanC Organization, SHuiTU68, TRAE
 description=Standalone implementation of Zygisk with Treat Wheel hiding.
 managedFeatures=kernel_umount
+metamodule=1

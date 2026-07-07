@@ -1,6 +1,8 @@
 import { exec, toast } from '../../kernelsu.js'
 
 const TW_STATE_PATH = '/data/adb/rezygisk/.rz_cfg'
+const TW_META_CFG_PATH = '/data/adb/rezygisk/.rz_meta_cfg'
+const TW_MODULES_DIR = '/data/adb/modules'
 
 const HidingState = {
   isIgnoring: false,
@@ -10,6 +12,17 @@ const HidingState = {
   isModuleLoadingTracesHiding: false,
   isFridaTracesHiding: false,
   isEnvSanitization: false
+}
+
+// INFO: MetaMount state. `isEnabled` is true only when Hrezygisk is the active
+// metamodule (/data/adb/metamodule symlink resolves to rezygisk), i.e. only on
+// KernelSU/APatch. `skipModules` mirrors the skip_modules= entry in .rz_meta_cfg
+// that metamount.sh sources. `availableModules` is the live list scanned from
+// /data/adb/modules/* (excluding rezygisk itself).
+const MetaMountState = {
+  isEnabled: false,
+  skipModules: [],
+  availableModules: []
 }
 
 function _writeState() {
@@ -119,6 +132,115 @@ function _setupSwitchListeners() {
   }
 }
 
+// INFO: Detect whether Hrezygisk is the active metamodule. KSU/APatch maintain
+// /data/adb/metamodule as a symlink to the active metamodule's directory; on
+// Magisk this path does not exist, so isEnabled stays false and the UI shows
+// the "not active" notice instead of the module list.
+async function _loadMetaEnabled() {
+  const r = await exec('readlink /data/adb/metamodule 2>/dev/null')
+  MetaMountState.isEnabled = (r.errno === 0 && /rezygisk$/.test(r.stdout.trim()))
+}
+
+// INFO: Read skip_modules from .rz_meta_cfg. Format (sourced by metamount.sh):
+//   skip_modules="id1 id2 id3"
+// Missing or malformed file => empty list (mount everything not skipped).
+async function _loadMetaCfg() {
+  MetaMountState.skipModules = []
+  const r = await exec(`cat ${TW_META_CFG_PATH} 2>/dev/null`)
+  if (r.errno !== 0) return
+  r.stdout.split('\n').forEach((line) => {
+    const m = line.match(/^skip_modules="(.*)"$/)
+    if (m) {
+      MetaMountState.skipModules = m[1].split(/\s+/).filter(Boolean)
+    }
+  })
+}
+
+// INFO: Scan installed modules for the exclusion list. We exclude rezygisk
+// itself (it is the metamodule, mounting it via itself makes no sense) and read
+// each module.prop for a friendly name + version to display.
+async function _loadAvailableModules() {
+  MetaMountState.availableModules = []
+  const r = await exec(`ls -1 ${TW_MODULES_DIR} 2>/dev/null`)
+  if (r.errno !== 0) return
+  const ids = r.stdout.split('\n').filter(Boolean).filter((id) => id !== 'rezygisk')
+  for (const id of ids) {
+    let name = id
+    let version = ''
+    const pr = await exec(`cat ${TW_MODULES_DIR}/${id}/module.prop 2>/dev/null`)
+    if (pr.errno === 0) {
+      pr.stdout.split('\n').forEach((line) => {
+        if (line.startsWith('name=')) name = line.slice(5)
+        if (line.startsWith('version=')) version = line.slice(8)
+      })
+    }
+    MetaMountState.availableModules.push({ id, name, version })
+  }
+}
+
+// INFO: Persist skip_modules to .rz_meta_cfg. Module IDs are alphanumeric by
+// convention, so the simple sourced form is safe. The file is read by
+// metamount.sh on every boot, so writes take effect on next reboot.
+function _writeMetaCfg() {
+  const skipList = MetaMountState.skipModules.filter(Boolean).join(' ')
+  return exec(`mkdir -p /data/adb/rezygisk && echo 'skip_modules="${skipList}"' > ${TW_META_CFG_PATH}`)
+}
+
+// INFO: Build the exclusion list DOM. A checked checkbox means the module IS
+// in skip_modules (i.e. NOT mounted by metamount.sh). Toggling updates state
+// and persists immediately — no separate save button needed.
+function _renderModuleList() {
+  const listEl = document.getElementById('tw_meta_module_list')
+  const noModulesEl = document.getElementById('tw_meta_no_modules')
+  const notActiveEl = document.getElementById('tw_meta_not_active')
+  if (!listEl) return
+
+  if (notActiveEl) notActiveEl.style.display = MetaMountState.isEnabled ? 'none' : 'block'
+
+  listEl.innerHTML = ''
+
+  if (!MetaMountState.isEnabled) {
+    if (noModulesEl) noModulesEl.style.display = 'none'
+    return
+  }
+
+  if (MetaMountState.availableModules.length === 0) {
+    if (noModulesEl) noModulesEl.style.display = 'block'
+    return
+  }
+  if (noModulesEl) noModulesEl.style.display = 'none'
+
+  for (const mod of MetaMountState.availableModules) {
+    const excluded = MetaMountState.skipModules.includes(mod.id)
+    const card = document.createElement('div')
+    card.className = 'small_card dimc'
+    card.style.marginBottom = '0'
+    const subtitle = mod.version ? `${mod.id} · ${mod.version}` : mod.id
+    card.innerHTML = `
+      <div class="action_card">
+        <div class="dimc content action_card_title">${mod.name}</div>
+        <div class="dimc desc action_card_description">${subtitle}</div>
+      </div>
+      <label class="switch dimc">
+        <input type="checkbox" data-meta-mod-id="${mod.id}">
+        <span class="slider"></span>
+      </label>
+    `
+    const cb = card.querySelector('input[type="checkbox"]')
+    cb.checked = excluded
+    cb.addEventListener('change', () => {
+      const id = cb.getAttribute('data-meta-mod-id')
+      if (cb.checked) {
+        if (!MetaMountState.skipModules.includes(id)) MetaMountState.skipModules.push(id)
+      } else {
+        MetaMountState.skipModules = MetaMountState.skipModules.filter((x) => x !== id)
+      }
+      _writeMetaCfg()
+    })
+    listEl.appendChild(card)
+  }
+}
+
 export async function loadOnce() {
 
 }
@@ -135,4 +257,8 @@ export async function load() {
   await _loadState()
   _syncSwitches()
   _setupSwitchListeners()
+  await _loadMetaEnabled()
+  await _loadMetaCfg()
+  await _loadAvailableModules()
+  _renderModuleList()
 }

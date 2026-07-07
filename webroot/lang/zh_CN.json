@@ -75,6 +75,13 @@
           "title": "环境变量净化",
           "description": "清除 LD_PRELOAD、MAGISK_* 等 root 相关环境变量，防止通过环境变量检测。"
         }
+      },
+      "metaMount": {
+        "title": "元模块挂载排除",
+        "description": "选择哪些模块不被 Hrezygisk 元模块挂载。仅在 KernelSU/APatch 上启用。",
+        "note": "更改将在下次重启后生效。",
+        "notActive": "元模块未激活。在 KernelSU 或 APatch 上安装以启用。",
+        "noModules": "没有其他已安装的模块。"
       }
     },
     "modules": {
