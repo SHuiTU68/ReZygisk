@@ -262,9 +262,14 @@ int read_fd(int fd) {
     .msg_controllen = sizeof(cmsgbuf)
   };
 
-  /* INFO: Use TEMP_FAILURE_RETRY to handle EINTR from signals, matching the
-   * loader-side implementation in socket_utils.c. */
-  ssize_t ret = TEMP_FAILURE_RETRY(recvmsg(fd, &msg, MSG_WAITALL));
+  /* INFO: Manually retry on EINTR instead of using TEMP_FAILURE_RETRY macro,
+   * which uses GNU statement-expression extension ({...}) and triggers
+   * -Wgnu-statement-expression-from-macro-expansion under -Wpedantic -Werror
+   * on clang 21 (NDK r29). */
+  ssize_t ret;
+  do {
+    ret = recvmsg(fd, &msg, MSG_WAITALL);
+  } while (ret == -1 && errno == EINTR);
   if (ret == -1) {
     LOGE("recvmsg: %s", strerror(errno));
 
