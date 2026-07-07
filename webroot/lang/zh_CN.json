@@ -37,6 +37,42 @@
           "stop": "停止",
           "pause": "暂停"
         }
+      },
+      "treatwheel": {
+        "title": "Treat Wheel",
+        "description": "集成在 ReZygisk 中的高级隐藏控制。",
+        "ignoreMode": {
+          "title": "忽略模式",
+          "description": "完全禁用所有 Treat Wheel 功能。"
+        },
+        "zygoteMountInfoLeakFixing": {
+          "title": "Zygote 挂载信息泄漏修复",
+          "description": "防止 zygote 的挂载信息泄漏。"
+        },
+        "mapsHiding": {
+          "title": "Maps 隐藏",
+          "description": "从 /proc/self/maps 中隐藏模块痕迹。"
+        },
+        "ReVancedModuleMountsHiding": {
+          "title": "ReVanced 挂载卸载",
+          "description": "卸载 ReVanced 模块挂载（需要 companion）。"
+        },
+        "customFontLoading": {
+          "title": "自定义字体加载",
+          "description": "通过 Treat Wheel 加载自定义字体（需要 companion）。"
+        },
+        "denylistLogicInversion": {
+          "title": "黑名单逻辑反转",
+          "description": "反转黑名单行为：黑名单应用获得干净的命名空间。"
+        },
+        "moduleLoadingTracesHiding": {
+          "title": "模块加载痕迹隐藏",
+          "description": "隐藏模块库加载的痕迹。"
+        },
+        "fridaTracesHiding": {
+          "title": "Frida 痕迹隐藏",
+          "description": "隐藏 Frida 相关痕迹以避免检测（实验性）。"
+        }
       }
     },
     "modules": {

@@ -5,6 +5,8 @@
 #include "hook.h"
 #include "ptrace_clear.h"
 
+#include "treat_wheel_adapter.h"
+
 __attribute__((visibility("default")))
 void entry(void *addr, size_t size, int tango_flag) {
   LOGD("ReZygisk%s library injected, version %s", tango_flag ? " [TANGO]" : "", ZKSU_VERSION);
@@ -14,6 +16,9 @@ void entry(void *addr, size_t size, int tango_flag) {
 
   LOGD("start plt hooking");
   hook_functions();
+
+  /* INFO: Initialize Treat Wheel hiding system */
+  tw_adapter_init();
 
   struct kernel_version version = parse_kversion();
   if (version.major > 3 || (version.major == 3 && version.minor >= 8)) {

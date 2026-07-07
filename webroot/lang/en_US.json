@@ -37,6 +37,42 @@
           "stop": "Stop",
           "pause": "Pause"
         }
+      },
+      "treatwheel": {
+        "title": "Treat Wheel",
+        "description": "Advanced hiding controls integrated into ReZygisk.",
+        "ignoreMode": {
+          "title": "Ignore Mode",
+          "description": "Completely disable all Treat Wheel features."
+        },
+        "zygoteMountInfoLeakFixing": {
+          "title": "Zygote Mountinfo Leak Fix",
+          "description": "Prevent mount information leaks from zygote."
+        },
+        "mapsHiding": {
+          "title": "Maps Hiding",
+          "description": "Hide module traces from /proc/self/maps."
+        },
+        "ReVancedModuleMountsHiding": {
+          "title": "ReVanced Mounts Umount",
+          "description": "Unmunt ReVanced module mounts (requires companion)."
+        },
+        "customFontLoading": {
+          "title": "Custom Font Loading",
+          "description": "Load custom fonts via Treat Wheel (requires companion)."
+        },
+        "denylistLogicInversion": {
+          "title": "Denylist Logic Inversion",
+          "description": "Invert denylist behavior: denylisted apps get clean namespace."
+        },
+        "moduleLoadingTracesHiding": {
+          "title": "Module Loading Traces Hiding",
+          "description": "Hide traces of module library loading."
+        },
+        "fridaTracesHiding": {
+          "title": "Frida Traces Hiding",
+          "description": "Hide Frida-related traces from detection (experimental)."
+        }
       }
     },
     "modules": {

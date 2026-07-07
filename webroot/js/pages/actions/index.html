@@ -16,4 +16,102 @@
       </div>
     </div>
   </div>
+
+  <!-- INFO: Treat Wheel hiding controls -->
+  <div class="dimc" style="margin: 15px 15px 0 15px; border-radius: 20px;">
+    <div class="dimc liste" style="padding: 30px 22px 20px; border-radius: 20px;">
+      <div id="treatwheel_title" class="dimc" style="font-size: 1.22em;">{{treatwheel.title}}</div>
+      <div id="treatwheel_desc" class="dimc" style="font-size: 0.95em; margin-top: 5px;">{{treatwheel.description}}</div>
+    </div>
+
+    <div class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px;">
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.ignoreMode.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.ignoreMode.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_ignore_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.zygoteMountInfoLeakFixing.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.zygoteMountInfoLeakFixing.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_zygote_mountinfo_leak_fixing_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.mapsHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.mapsHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_maps_hiding_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.ReVancedModuleMountsHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.ReVancedModuleMountsHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_revanced_mounts_umount_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.customFontLoading.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.customFontLoading.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_custom_font_loading_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.denylistLogicInversion.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.denylistLogicInversion.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_denylist_logic_inversion_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.moduleLoadingTracesHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.moduleLoadingTracesHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_module_loading_traces_hiding_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{treatwheel.fridaTracesHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{treatwheel.fridaTracesHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_frida_traces_hiding_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
 </div>

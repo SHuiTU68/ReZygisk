@@ -26,6 +26,8 @@
 #include "art_method.h"
 #include "cpp_strings.h"
 
+#include "treat_wheel_adapter.h"
+
 void *start_addr = NULL;
 size_t block_size = 0;
 
@@ -1130,6 +1132,9 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   */
   rz_run_modules_pre(ctx);
 
+  /* INFO: Run Treat Wheel hiding after modules pre-specialize */
+  tw_adapter_pre_specialize(ctx->env, ctx->process, ctx->info_flags);
+
   /* INFO: The modules may request that although the process is NOT in
               the DenyList, it has its mount namespace switched to the clean
               one.
@@ -1273,6 +1278,9 @@ static void rz_cleanup(struct zygisk_context *ctx) {
   for (size_t i = 0; i < zygisk_module_length; i++) {
     memset(&zygisk_modules[i], 0, sizeof(zygisk_modules[i]));
   }
+
+  /* INFO: Run Treat Wheel atexit hiding before unloading */
+  tw_adapter_atexit_cleanup(ctx->env, ctx->info_flags);
 
   enable_unloader = true;
   pthread_mutex_destroy(&ctx->hook_info_lock);

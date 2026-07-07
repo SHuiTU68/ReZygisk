@@ -29,12 +29,16 @@ COMMON_LDFLAGS = -static-libstdc++ -Wl,--build-id=sha1 -Wl,--no-rosegment       
 COMMON_SRCS = src/common/daemon.c src/common/elf_util.c src/common/ifunc_shim.c \
 			  src/common/misc.c src/common/socket_utils.c
 INJECTOR_SRCS = src/injector/cpp_strings.c src/injector/entry.c \
-				src/injector/hook.c src/injector/ptrace_clear.c
+				 src/injector/hook.c src/injector/ptrace_clear.c \
+				 src/treat_wheel/hiding.c src/treat_wheel/elf_util.c \
+				 src/treat_wheel/utils.c src/treat_wheel/rz_daemon.c \
+				 src/treat_wheel/treat_wheel_adapter.c
 PTRACER_SRCS = src/ptracer/main.c src/ptracer/monitor.c src/ptracer/ptracer.c \
 			   src/ptracer/remote_csoloader.c src/ptracer/utils.c
 
 COMMON_OBJS = $(patsubst src/common/%.c,$(OBJ_DIR)/common/%.o,$(COMMON_SRCS))
-INJECTOR_OBJS = $(patsubst src/injector/%.c,$(OBJ_DIR)/injector/%.o,$(INJECTOR_SRCS))
+INJECTOR_OBJS = $(patsubst src/injector/%.c,$(OBJ_DIR)/injector/%.o,$(filter src/injector/%.c,$(INJECTOR_SRCS))) \
+                $(patsubst src/treat_wheel/%.c,$(OBJ_DIR)/treat_wheel/%.o,$(filter src/treat_wheel/%.c,$(INJECTOR_SRCS)))
 PTRACER_OBJS = $(patsubst src/ptracer/%.c,$(OBJ_DIR)/ptracer/%.o,$(PTRACER_SRCS))
 
 PLTI_LIB = $(BUILD_DIR)/obj/$(BUILD_TYPE)/plti/$(ARCH)/libplti.a
@@ -50,7 +54,7 @@ PLTI_DIR = src/external/plti
 CSOLOADER_DIR = src/external/csoloader
 
 COMMON_INCLUDES = -Isrc/include
-INJECTOR_INCLUDES = -Isrc/include -I$(PLTI_DIR)/src -I$(CSOLOADER_DIR)/include
+INJECTOR_INCLUDES = -Isrc/include -Isrc/treat_wheel -I$(PLTI_DIR)/src -I$(CSOLOADER_DIR)/include
 
 .PHONY: all arch clean
 
@@ -90,6 +94,11 @@ $(OBJ_DIR)/injector/%.o: src/injector/%.c
 	@mkdir -p $(dir $@)
 	$(CC_ARCH) $(NDK_CFLAGS) $(LOADER_CFLAGS) $(TYPE_CFLAGS) \
 		$(INJECTOR_INCLUDES) -Dzygisk_EXPORTS -fPIC -c $< -o $@
+
+$(OBJ_DIR)/treat_wheel/%.o: src/treat_wheel/%.c
+	@mkdir -p $(dir $@)
+	$(CC_ARCH) $(NDK_CFLAGS) $(LOADER_CFLAGS) $(TYPE_CFLAGS) \
+		$(INJECTOR_INCLUDES) -Dzygisk_EXPORTS -DIS_ZYGISK_LIB -fPIC -c $< -o $@
 
 $(OBJ_DIR)/ptracer/%.o: src/ptracer/%.c
 	@mkdir -p $(dir $@)
