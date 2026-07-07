@@ -48,8 +48,22 @@
   justify-content: space-between;
   background-color: var(--dim);
   left: 0; right: 0; bottom: 0;
-  padding: 20px 25px;
+  padding: 20px 15px;
   font-size: 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  gap: 4px;
+}
+
+#navbar::-webkit-scrollbar {
+  display: none;
+}
+
+#navbar > .navicon_support {
+  flex-shrink: 0;
 }
 
 .navtitle {
