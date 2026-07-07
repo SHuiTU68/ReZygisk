@@ -10,6 +10,18 @@
 # Only KernelSU and APatch drive the metamodule hooks; on Magisk this file is
 # never invoked (Magisk ignores metamodule=1 in module.prop).
 #
+# CRITICAL SAFETY RULE: On KernelSU/APatch, the root implementation ALREADY
+# overlays system partitions to mount modules. If metamount.sh tries to overlay
+# them AGAIN, it creates a nested double-overlay that breaks system_server,
+# zygote, and surfaceflinger → black screen → hot reboot → bootloop.
+# Therefore, metamount.sh MUST detect and skip partitions that are already
+# overlay-mounted. This is the primary bootloop prevention mechanism.
+#
+# Additionally, ALL critical Android partitions (system, vendor, product,
+# system_ext, odm, etc.) are in DANGEROUS_PARTITIONS and excluded by default.
+# The user must explicitly allow each partition via allow_partitions= in
+# .rz_meta_cfg to override this.
+#
 # Three mount backends (inspired by mountify):
 #   tmpfs — stage on /mnt/vendor/<name> tmpfs, hardest to detect
 #   ext4  — loop-mounted ext4 image at /data/adb/rezygisk/.rw/<name>.img
@@ -81,26 +93,71 @@ _should_mount_module() {
   return 0
 }
 
-# INFO: Collect partitions to overlay. Only top-level entries under system/.
+# INFO: Detect whether a mount point is already an overlay mount.
+# On KernelSU/APatch, the root implementation overlays system partitions to
+# mount modules at post-fs-data, BEFORE this script runs. If we try to overlay
+# them again, we create a nested double-overlay that causes bootloops.
+# This function reads /proc/mounts and returns 0 (true) if the given partition
+# is already mounted as an overlay filesystem.
+_is_already_overlay() {
+  _mp="/$1"
+  [ -n "$_mp" ] || return 1
+  while read -r _dev _mountpoint _fstype _rest; do
+    [ "$_mountpoint" = "$_mp" ] || continue
+    case "$_fstype" in
+      overlay) return 0;;
+    esac
+  done < /proc/mounts 2>/dev/null
+  return 1
+}
+
+# INFO: allow_partitions is a comma-separated (or space-separated) list of
+# partitions the user has explicitly allowed to be overlaid despite being in
+# DANGEROUS_PARTITIONS. Default empty = no dangerous partitions are overlaid.
 #
-# SAFETY: The "system" partition is EXCLUDED by default. Overlaying /system at
-# post-fs-data breaks system_server/zygote startup — the overlay upperdir may
-# not be fully visible to all processes at that early stage, causing missing
-# framework JARs → black screen → hot reboot loop. This was the root cause of
-# the bootloop users experienced. Only vendor/product/system_ext/odm and other
-# non-critical partitions are safe to overlay here.
-# The user can override this via allow_system=true in .rz_meta_cfg, but this is
-# strongly discouraged and logged as a warning.
-ALLOW_SYSTEM=false
+# For backward compatibility, allow_system=true is treated as
+# allow_partitions=system.
+ALLOW_PARTITIONS=""
 if [ -f "$CFG" ]; then
-  # re-read just this flag (already sourced above, but be explicit)
-  grep -q '^allow_system=true' "$CFG" 2>/dev/null && ALLOW_SYSTEM=true
+  _ap=$(grep '^allow_partitions=' "$CFG" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr ',' ' ')
+  if [ -n "$_ap" ]; then
+    ALLOW_PARTITIONS="$_ap"
+  fi
+  # Legacy: allow_system=true => allow system partition
+  if grep -q '^allow_system=true' "$CFG" 2>/dev/null; then
+    case " $ALLOW_PARTITIONS " in
+      *" system "*) ;;
+      *) ALLOW_PARTITIONS="$ALLOW_PARTITIONS system";;
+    esac
+  fi
 fi
+_meta_log "allow_partitions=[$ALLOW_PARTITIONS]"
 
-# SAFETY: DANGEROUS_PARTITIONS contains partitions that are known to cause
-# bootloops when overlaid at post-fs-data. "system" is the primary offender.
-DANGEROUS_PARTITIONS="system"
+# SAFETY: DANGEROUS_PARTITIONS contains ALL critical Android system partitions
+# that are known to cause bootloops when overlaid at post-fs-data. Overlaying
+# any of these can break system_server, zygote, surfaceflinger, vold, or
+# SystemUI, causing black screen → hot reboot → bootloop.
+#
+#   system       — framework JARs, system apps
+#   vendor       — HALs, vendor binaries, surfaceflinger dependencies
+#   product      — SystemUI, launcher, product apps
+#   system_ext   — system extensions, permission controllers
+#   odm          — ODM HALs and configurations
+#   vendor_dlkm  — vendor kernel modules
+#   system_dlkm  — system kernel modules
+#   miui/oppo/etc — OEM-specific partitions (Xiaomi, OPPO, etc.)
+DANGEROUS_PARTITIONS="system vendor product system_ext odm vendor_dlkm system_dlkm miui oppo my_preload my_region my_product my_stock my_engineering"
 
+# INFO: Check if a partition name is in the allow list.
+_is_partition_allowed() {
+  _pn="$1"
+  case " $ALLOW_PARTITIONS " in
+    *" $_pn "*) return 0;;
+    *) return 1;;
+  esac
+}
+
+# INFO: Collect partitions to overlay. Only top-level entries under system/.
 PARTITIONS=""
 for mod in /data/adb/modules/*; do
   _should_mount_module "$mod" || continue
@@ -111,17 +168,29 @@ for mod in /data/adb/modules/*; do
     case "$pname" in
       ""|*..*|*/*) continue;;
     esac
-    # SAFETY: skip dangerous partitions unless explicitly allowed
-    if [ "$ALLOW_SYSTEM" != "true" ]; then
-      case " $DANGEROUS_PARTITIONS " in
-        *" $pname "*)
-          _meta_log "skip dangerous partition: $pname (set allow_system=true to override)"
-          continue
-          ;;
-      esac
-    else
-      _meta_log "WARNING: mounting dangerous partition $pname (user override)"
+
+    # SAFETY: Skip if this partition is ALREADY an overlay mount.
+    # On KSU/APatch, the root implementation already mounted modules via
+    # overlay. Re-overlay causes double-overlay → bootloop. This is the
+    # PRIMARY bootloop prevention.
+    if _is_already_overlay "$pname"; then
+      _meta_log "skip $pname: already an overlay mount (managed by $SOURCE), re-overlay would cause bootloop"
+      continue
     fi
+
+    # SAFETY: Skip dangerous partitions unless explicitly allowed by user.
+    _is_dangerous=false
+    case " $DANGEROUS_PARTITIONS " in
+      *" $pname "*) _is_dangerous=true;;
+    esac
+    if [ "$_is_dangerous" = "true" ]; then
+      if ! _is_partition_allowed "$pname"; then
+        _meta_log "skip dangerous partition: $pname (add to allow_partitions to override)"
+        continue
+      fi
+      _meta_log "WARNING: mounting dangerous partition $pname (user explicitly allowed)"
+    fi
+
     case " $PARTITIONS " in
       *" $pname "*) ;;
       *) PARTITIONS="$PARTITIONS $pname";;
@@ -132,7 +201,7 @@ done
 _meta_log "partitions discovered:[$PARTITIONS]"
 
 # SAFETY: If no partitions, nothing to do. Avoid any mount operations.
-[ -z "$PARTITIONS" ] && { _meta_log "no partitions to mount, exiting"; exit 0; }
+[ -z "$PARTITIONS" ] && { _meta_log "no partitions to mount (all skipped or no modules), exiting"; exit 0; }
 
 _try_setup_tmpfs() {
   STAGE="/mnt/vendor/$FAKE_MOUNT_NAME"
@@ -243,6 +312,13 @@ for P in $PARTITIONS; do
     ""|*..*|*/*) _meta_log "skip unsafe partition name: [$P]"; continue;;
   esac
   [ -d "$lower" ] || { _meta_log "skip $P: $lower not a dir"; continue; }
+
+  # SAFETY: Double-check overlay status right before mounting. The partition
+  # may have been overlaid by KSU/APatch between our initial scan and now.
+  if _is_already_overlay "$P"; then
+    _meta_log "skip $P: became overlay mount before we could act, skipping to avoid bootloop"
+    continue
+  fi
 
   if [ "$MOUNT_MODE" = "direct" ] || [ -z "$STAGE" ]; then
     upper="$RW_BASE/$P/upper"

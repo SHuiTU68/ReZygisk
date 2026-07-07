@@ -84,7 +84,7 @@
     "metamount": {
       "title": "Meta Mount",
       "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
-      "note": "Changes take effect on next reboot. The 'system' partition is excluded by default to prevent bootloops.",
+      "note": "Changes take effect on next reboot. All system partitions are excluded by default. Partitions already overlaid by KernelSU/APatch are auto-skipped to prevent bootloops.",
       "settings": {
         "enabled": {
           "title": "Enable Meta Mount",
@@ -102,11 +102,13 @@
           "title": "Fake Mount Name",
           "description": "Custom name for the staging point (/mnt/vendor/<name>). Used by tmpfs and ext4 modes.",
           "placeholder": "rezygisk"
-        },
-        "allowSystem": {
-          "title": "Allow System Partition (DANGEROUS)",
-          "description": "Overlay the /system partition. WARNING: This can cause bootloops, black screens, or hot reboots. Only enable if you know what you are doing."
         }
+      },
+      "partitions": {
+        "title": "Partition Allow List (DANGEROUS)",
+        "description": "All system partitions are excluded by default to prevent bootloops. Toggle a partition to explicitly allow overlaying it. WARNING: enabling any of these can cause bootloops, black screens, or hot reboots.",
+        "noPartitions": "No partitions discovered from installed modules.",
+        "note": "On KernelSU/APatch, partitions already overlaid by the root implementation are automatically skipped to prevent double-overlay bootloops."
       },
       "exclusions": {
         "title": "Module Exclusions",

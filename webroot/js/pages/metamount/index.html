@@ -41,16 +41,26 @@
         <input id="ma_fake_name_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.fakeName.placeholder}}">
       </div>
 
-      <!-- SAFETY: allow_system override toggle -->
+      <!-- SAFETY: Partition allow list. All critical partitions are excluded by
+           default. User must explicitly toggle each one to allow overlay. -->
       <div class="small_card dimc" style="margin-bottom: 0;">
         <div class="action_card">
-          <div class="dimc content action_card_title">{{settings.allowSystem.title}}</div>
-          <div class="dimc desc action_card_description">{{settings.allowSystem.description}}</div>
+          <div class="dimc content action_card_title">{{partitions.title}}</div>
+          <div class="dimc desc action_card_description">{{partitions.description}}</div>
         </div>
-        <label class="switch dimc">
-          <input id="ma_allow_system_switch" type="checkbox">
-          <span class="slider"></span>
-        </label>
+      </div>
+    </div>
+
+    <!-- INFO: Partition allow list -->
+    <div id="ma_partitions" class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px; display: none;">
+      <div id="ma_no_partitions" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0; display: none;">
+        {{partitions.noPartitions}}
+      </div>
+
+      <div id="ma_partition_list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+
+      <div class="dimc" style="font-size: 0.8em; color: var(--text-secondary); padding-top: 10px;">
+        {{partitions.note}}
       </div>
     </div>
 

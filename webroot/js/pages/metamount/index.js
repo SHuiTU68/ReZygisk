@@ -12,9 +12,10 @@ const MetaMountState = {
   metaEnabled: false,
   mountMode: 'auto',
   fakeName: 'rezygisk',
-  allowSystem: false,
+  allowedPartitions: [],
   skipModules: [],
-  availableModules: []
+  availableModules: [],
+  discoveredPartitions: []
 }
 
 // INFO: Detect whether Hrezygisk is the active metamodule. KSU/APatch maintain
@@ -30,15 +31,16 @@ async function _loadMetamoduleStatus() {
 //   enabled=true|false
 //   mount_mode=auto|tmpfs|ext4|direct
 //   fake_mount_name=rezygisk
-//   allow_system=true|false
+//   allow_partitions="system vendor product"  (space or comma separated)
 //   skip_modules="id1 id2 id3"
 // Missing or malformed file => defaults (all disabled for safety).
+// For backward compatibility, allow_system=true is parsed as allow_partitions+=system.
 async function _loadMetaCfg() {
   MetaMountState.skipModules = []
   MetaMountState.metaEnabled = false
   MetaMountState.mountMode = 'auto'
   MetaMountState.fakeName = 'rezygisk'
-  MetaMountState.allowSystem = false
+  MetaMountState.allowedPartitions = []
   const r = await exec(`cat ${MA_CFG_PATH} 2>/dev/null`)
   if (r.errno !== 0) return
   r.stdout.split('\n').forEach((line) => {
@@ -65,18 +67,28 @@ async function _loadMetaCfg() {
       MetaMountState.fakeName = fm[1].trim() || 'rezygisk'
       return
     }
+    const ap = line.match(/^allow_partitions="(.*)"$/)
+    if (ap) {
+      MetaMountState.allowedPartitions = ap[1].split(/[\s,]+/).filter(Boolean)
+      return
+    }
+    // Legacy: allow_system=true => allow system partition
     const as = line.match(/^allow_system=(.+)$/)
-    if (as) {
-      MetaMountState.allowSystem = as[1].trim() === 'true'
+    if (as && as[1].trim() === 'true') {
+      if (!MetaMountState.allowedPartitions.includes('system')) {
+        MetaMountState.allowedPartitions.push('system')
+      }
     }
   })
 }
 
 // INFO: Scan /data/adb/modules/* for installed modules (excluding rezygisk
 // itself — it is the metamodule, mounting it via itself makes no sense) and
-// read each module.prop for display.
+// read each module.prop for display. Also discover which partitions each
+// module wants to overlay (top-level dirs under system/).
 async function _loadAvailableModules() {
   MetaMountState.availableModules = []
+  MetaMountState.discoveredPartitions = []
   const r = await exec(`ls -1 ${MA_MODULES_DIR} 2>/dev/null`)
   if (r.errno !== 0) return
   const ids = r.stdout.split('\n').filter(Boolean)
@@ -92,21 +104,29 @@ async function _loadAvailableModules() {
     })
     MetaMountState.availableModules.push({ id, name, version })
   }
+  // Discover partitions from all modules' system/ directories
+  const partR = await exec(
+    `for m in ${MA_MODULES_DIR}/*/system; do [ -d "$m" ] || continue; ` +
+    `ls -1 "$m" 2>/dev/null; done | sort -u`
+  )
+  if (partR.errno === 0) {
+    MetaMountState.discoveredPartitions = partR.stdout.split('\n').filter(Boolean)
+  }
 }
 
 // INFO: Persist all metamodule config to .rz_meta_cfg. The file is sourced by
 // metamount.sh on every boot, so writes take effect on next reboot.
 function _writeMetaCfg() {
   const skipList = MetaMountState.skipModules.filter(Boolean).join(' ')
+  const allowList = MetaMountState.allowedPartitions.filter(Boolean).join(' ')
   const enabled = MetaMountState.metaEnabled ? 'true' : 'false'
   const mode = MetaMountState.mountMode
   const name = (MetaMountState.fakeName || 'rezygisk').replace(/[^A-Za-z0-9_]/g, '') || 'rezygisk'
-  const allowSys = MetaMountState.allowSystem ? 'true' : 'false'
   return exec(`mkdir -p /data/adb/rezygisk && cat > ${MA_CFG_PATH} <<'RZMETACFG'
 enabled=${enabled}
 mount_mode=${mode}
 fake_mount_name=${name}
-allow_system=${allowSys}
+allow_partitions="${allowList}"
 skip_modules="${skipList}"
 RZMETACFG`)
 }
@@ -116,20 +136,20 @@ function _syncUI() {
   const notActiveEl = document.getElementById('ma_not_active')
   const settingsEl = document.getElementById('ma_settings')
   const exclusionsEl = document.getElementById('ma_exclusions')
+  const partitionsEl = document.getElementById('ma_partitions')
   const enabledSwitch = document.getElementById('ma_enabled_switch')
   const modeSelect = document.getElementById('ma_mode_select')
   const nameInput = document.getElementById('ma_fake_name_input')
-  const allowSysSwitch = document.getElementById('ma_allow_system_switch')
 
   const active = MetaMountState.isMetamodule
   if (notActiveEl) notActiveEl.style.display = active ? 'none' : 'block'
   if (settingsEl) settingsEl.style.display = active ? 'block' : 'none'
   if (exclusionsEl) exclusionsEl.style.display = active ? 'block' : 'none'
+  if (partitionsEl) partitionsEl.style.display = active ? 'block' : 'none'
 
   if (enabledSwitch) enabledSwitch.checked = MetaMountState.metaEnabled
   if (modeSelect) modeSelect.value = MetaMountState.mountMode
   if (nameInput) nameInput.value = MetaMountState.fakeName
-  if (allowSysSwitch) allowSysSwitch.checked = MetaMountState.allowSystem
 }
 
 // INFO: Build the exclusion list DOM. A checked checkbox means the module IS
@@ -183,13 +203,65 @@ function _renderModuleList() {
   }
 }
 
+// INFO: Build the partition allow list DOM. Each discovered partition gets a
+// toggle. A checked toggle means the partition IS in allow_partitions (i.e.
+// explicitly allowed to be overlaid despite being dangerous).
+function _renderPartitionList() {
+  const listEl = document.getElementById('ma_partition_list')
+  const noPartEl = document.getElementById('ma_no_partitions')
+  if (!listEl) return
+
+  listEl.innerHTML = ''
+
+  if (!MetaMountState.isMetamodule) {
+    if (noPartEl) noPartEl.style.display = 'none'
+    return
+  }
+
+  if (MetaMountState.discoveredPartitions.length === 0) {
+    if (noPartEl) noPartEl.style.display = 'block'
+    return
+  }
+  if (noPartEl) noPartEl.style.display = 'none'
+
+  for (const part of MetaMountState.discoveredPartitions) {
+    const allowed = MetaMountState.allowedPartitions.includes(part)
+    const card = document.createElement('div')
+    card.className = 'small_card dimc'
+    card.style.marginBottom = '0'
+    card.innerHTML = `
+      <div class="action_card">
+        <div class="dimc content action_card_title">${part}</div>
+        <div class="dimc desc action_card_description">/${part}</div>
+      </div>
+      <label class="switch dimc">
+        <input type="checkbox" data-ma-part="${part}">
+        <span class="slider"></span>
+      </label>
+    `
+    const cb = card.querySelector('input[type="checkbox"]')
+    cb.checked = allowed
+    cb.addEventListener('change', () => {
+      const p = cb.getAttribute('data-ma-part')
+      if (cb.checked) {
+        if (!MetaMountState.allowedPartitions.includes(p)) {
+          MetaMountState.allowedPartitions.push(p)
+        }
+      } else {
+        MetaMountState.allowedPartitions = MetaMountState.allowedPartitions.filter((x) => x !== p)
+      }
+      _writeMetaCfg()
+    })
+    listEl.appendChild(card)
+  }
+}
+
 // INFO: Wire up change listeners for settings controls. Each change updates
 // state and persists immediately.
 function _setupListeners() {
   const enabledSwitch = document.getElementById('ma_enabled_switch')
   const modeSelect = document.getElementById('ma_mode_select')
   const nameInput = document.getElementById('ma_fake_name_input')
-  const allowSysSwitch = document.getElementById('ma_allow_system_switch')
 
   if (enabledSwitch) {
     enabledSwitch.addEventListener('change', () => {
@@ -216,12 +288,6 @@ function _setupListeners() {
       }
     })
   }
-  if (allowSysSwitch) {
-    allowSysSwitch.addEventListener('change', () => {
-      MetaMountState.allowSystem = allowSysSwitch.checked
-      _writeMetaCfg()
-    })
-  }
 }
 
 export async function loadOnce() {
@@ -241,6 +307,7 @@ export async function load() {
   await _loadMetaCfg()
   await _loadAvailableModules()
   _syncUI()
+  _renderPartitionList()
   _renderModuleList()
   _setupListeners()
 }

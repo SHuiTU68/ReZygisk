@@ -84,7 +84,7 @@
     "metamount": {
       "title": "元模块挂载",
       "notActive": "元模块未激活。在 KernelSU 或 APatch 上安装以启用。",
-      "note": "更改将在下次重启后生效。system 分区默认排除以防止无法开机。",
+      "note": "更改将在下次重启后生效。所有系统分区默认排除，已挂载的分区自动跳过以防止 bootloop。",
       "settings": {
         "enabled": {
           "title": "启用元模块挂载",
@@ -102,11 +102,13 @@
           "title": "自定义挂载名称",
           "description": "暂存点名称（/mnt/vendor/<名称>）。tmpfs 和 ext4 模式使用。",
           "placeholder": "rezygisk"
-        },
-        "allowSystem": {
-          "title": "允许挂载 system 分区（危险）",
-          "description": "对 /system 分区做 overlay 挂载。警告：这可能导致无法开机、黑屏或热重启。仅在确切知道自己在做什么时启用。"
         }
+      },
+      "partitions": {
+        "title": "分区允许列表（危险）",
+        "description": "所有系统分区默认排除以防止 bootloop。逐个开关以显式允许挂载。警告：启用任何分区都可能导致 bootloop、黑屏或热重启。",
+        "noPartitions": "未从已安装模块中发现分区。",
+        "note": "在 KernelSU/APatch 上，已被 root 实现挂载的分区会被自动跳过，以防止双重 overlay 导致 bootloop。"
       },
       "exclusions": {
         "title": "模块排除列表",

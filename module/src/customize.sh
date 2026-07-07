@@ -248,7 +248,7 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
   fi
 
   ui_print "*********************************************************"
-  ui_print " 配置已保存，可在 WebUI > 隐藏 中修改"
+  ui_print " 配置已保存，可在 WebUI > 元模块挂载 中修改"
   ui_print "*********************************************************"
 
   # INFO: Persist the configuration so metamount.sh can source it on next boot.
@@ -257,7 +257,7 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
 enabled=$META_ENABLED
 mount_mode=$META_MOUNT_MODE
 fake_mount_name=$META_FAKE_NAME
-allow_system=false
+allow_partitions=""
 skip_modules=""
 METACFG
 fi
