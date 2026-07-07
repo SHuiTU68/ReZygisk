@@ -8,7 +8,8 @@ const HidingState = {
   isMapsHiding: false,
   isDenylistLogicInversion: false,
   isModuleLoadingTracesHiding: false,
-  isFridaTracesHiding: false
+  isFridaTracesHiding: false,
+  isOverlayfsHiding: false
 }
 
 function _writeState() {
@@ -19,6 +20,7 @@ function _writeState() {
   if (!HidingState.isDenylistLogicInversion) state += 'disable_denylist_logic_inversion=true\n'
   if (!HidingState.isModuleLoadingTracesHiding) state += 'disable_module_loading_traces_hiding=true\n'
   if (!HidingState.isFridaTracesHiding) state += 'disable_frida_traces_hiding=true\n'
+  if (!HidingState.isOverlayfsHiding) state += 'disable_overlayfs_hiding=true\n'
   return exec(`mkdir -p /data/adb/rezygisk && echo "${state}" > ${TW_STATE_PATH}`)
 }
 
@@ -31,6 +33,7 @@ async function _loadState() {
     HidingState.isDenylistLogicInversion = true
     HidingState.isModuleLoadingTracesHiding = true
     HidingState.isFridaTracesHiding = true
+    HidingState.isOverlayfsHiding = true
     return
   }
 
@@ -41,6 +44,7 @@ async function _loadState() {
     if (line.startsWith('disable_denylist_logic_inversion=')) HidingState.isDenylistLogicInversion = line.split('=')[1] !== 'true'
     if (line.startsWith('disable_module_loading_traces_hiding=')) HidingState.isModuleLoadingTracesHiding = line.split('=')[1] !== 'true'
     if (line.startsWith('disable_frida_traces_hiding=')) HidingState.isFridaTracesHiding = line.split('=')[1] !== 'true'
+    if (line.startsWith('disable_overlayfs_hiding=')) HidingState.isOverlayfsHiding = line.split('=')[1] !== 'true'
   })
 }
 
@@ -51,6 +55,7 @@ function _syncSwitches() {
   const denylistSwitch = document.getElementById('tw_disable_denylist_logic_inversion_switch')
   const moduleSwitch = document.getElementById('tw_disable_module_loading_traces_hiding_switch')
   const fridaSwitch = document.getElementById('tw_disable_frida_traces_hiding_switch')
+  const overlayfsSwitch = document.getElementById('tw_disable_overlayfs_hiding_switch')
 
   if (ignoreSwitch) ignoreSwitch.checked = HidingState.isIgnoring
   if (zygoteSwitch) zygoteSwitch.checked = HidingState.isZygoteMountInfoLeakFixing
@@ -58,6 +63,7 @@ function _syncSwitches() {
   if (denylistSwitch) denylistSwitch.checked = HidingState.isDenylistLogicInversion
   if (moduleSwitch) moduleSwitch.checked = HidingState.isModuleLoadingTracesHiding
   if (fridaSwitch) fridaSwitch.checked = HidingState.isFridaTracesHiding
+  if (overlayfsSwitch) overlayfsSwitch.checked = HidingState.isOverlayfsHiding
 }
 
 function _setupSwitchListeners() {
@@ -67,6 +73,7 @@ function _setupSwitchListeners() {
   const denylistSwitch = document.getElementById('tw_disable_denylist_logic_inversion_switch')
   const moduleSwitch = document.getElementById('tw_disable_module_loading_traces_hiding_switch')
   const fridaSwitch = document.getElementById('tw_disable_frida_traces_hiding_switch')
+  const overlayfsSwitch = document.getElementById('tw_disable_overlayfs_hiding_switch')
 
   if (ignoreSwitch) {
     ignoreSwitch.addEventListener('change', () => {
@@ -101,6 +108,12 @@ function _setupSwitchListeners() {
   if (fridaSwitch) {
     fridaSwitch.addEventListener('change', () => {
       HidingState.isFridaTracesHiding = fridaSwitch.checked
+      _writeState()
+    })
+  }
+  if (overlayfsSwitch) {
+    overlayfsSwitch.addEventListener('change', () => {
+      HidingState.isOverlayfsHiding = overlayfsSwitch.checked
       _writeState()
     })
   }

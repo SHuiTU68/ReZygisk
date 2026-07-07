@@ -92,6 +92,8 @@ static void tw_load_state(void) {
       g_tw_state.disable_module_loading_traces_hiding = strncmp(line + strlen("disable_module_loading_traces_hiding="), "true", 4) == 0;
     } else if (tw_str_starts_with(line, "disable_frida_traces_hiding=")) {
       g_tw_state.disable_frida_traces_hiding = strncmp(line + strlen("disable_frida_traces_hiding="), "true", 4) == 0;
+    } else if (tw_str_starts_with(line, "disable_overlayfs_hiding=")) {
+      g_tw_state.disable_overlayfs_hiding = strncmp(line + strlen("disable_overlayfs_hiding="), "true", 4) == 0;
     }
   }
 
@@ -162,6 +164,9 @@ void tw_adapter_pre_specialize(JNIEnv *env, const char *process_name, uint32_t f
     if (!g_tw_state.disable_frida_traces_hiding) {
       tw_do_frida_hiding(NULL, env);
     }
+    if (!g_tw_state.disable_overlayfs_hiding) {
+      tw_do_overlayfs_hiding(NULL, env);
+    }
   }
 }
 
@@ -189,6 +194,7 @@ bool tw_adapter_is_enabled(const char *feature) {
   if (strcmp(feature, "denylist_logic_inversion") == 0) return !g_tw_state.disable_denylist_logic_inversion;
   if (strcmp(feature, "module_loading_traces_hiding") == 0) return !g_tw_state.disable_module_loading_traces_hiding;
   if (strcmp(feature, "frida_traces_hiding") == 0) return !g_tw_state.disable_frida_traces_hiding;
+  if (strcmp(feature, "overlayfs_hiding") == 0) return !g_tw_state.disable_overlayfs_hiding;
 
   return false;
 }

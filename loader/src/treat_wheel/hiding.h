@@ -25,4 +25,6 @@ int tw_do_atexit_hiding(struct api_table *api_table, JNIEnv *tw_env);
 
 int tw_do_frida_hiding(struct api_table *api_table, JNIEnv *tw_env);
 
+int tw_do_overlayfs_hiding(struct api_table *api_table, JNIEnv *tw_env);
+
 #endif /* TW_HIDING_H */

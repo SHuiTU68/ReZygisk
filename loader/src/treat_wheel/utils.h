@@ -86,6 +86,7 @@ struct tw_module_state {
   bool disable_denylist_logic_inversion;
   bool disable_module_loading_traces_hiding;
   bool disable_frida_traces_hiding;
+  bool disable_overlayfs_hiding;
 };
 
 bool tw_str_starts_with(const char *str, const char *needle);

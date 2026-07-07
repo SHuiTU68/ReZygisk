@@ -4,12 +4,26 @@ import { setThemeData, themeList } from './themes/main.js'
 import { setLight } from './themes/light.js'
 import { loadPage } from './pages/pageLoader.js'
 
+/* INFO: Unified localStorage prefix to match pageLoader.js (Hrezygisk). The
+ * previous '/ReZygisk/' prefix caused theme/config to be lost after the
+ * module rename. Migrate old keys on first load. */
+const LS_PREFIX = '/Hrezygisk/'
+function _migrateLsKey(oldKey, newKey) {
+  const v = localStorage.getItem(oldKey)
+  if (v !== null && localStorage.getItem(newKey) === null) {
+    localStorage.setItem(newKey, v)
+    localStorage.removeItem(oldKey)
+  }
+}
+_migrateLsKey('/ReZygisk/theme', `${LS_PREFIX}theme`)
+_migrateLsKey('/ReZygisk/webui_config', `${LS_PREFIX}webui_config`)
+
 /* INFO: This sets the default theme to system if not set */
-let sys_theme = localStorage.getItem('/ReZygisk/theme')
+let sys_theme = localStorage.getItem(`${LS_PREFIX}theme`)
 if (!sys_theme) sys_theme = setThemeData('system')
 themeList[sys_theme](true)
 
-const ConfigState = JSON.parse(localStorage.getItem('/ReZygisk/webui_config') || '{}')
+const ConfigState = JSON.parse(localStorage.getItem(`${LS_PREFIX}webui_config`) || '{}')
 
 if (!ConfigState.disableFullscreen) fullScreen(true)
 

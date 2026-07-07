@@ -70,6 +70,10 @@
         "fridaTracesHiding": {
           "title": "Frida Traces Hiding",
           "description": "Hide Frida-related traces from detection (experimental)."
+        },
+        "overlayfsHiding": {
+          "title": "OverlayFS Hiding",
+          "description": "Unmount overlay (ext4-backed) module mounts to hide root traces from mountinfo."
         }
       }
     },

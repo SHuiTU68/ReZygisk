@@ -8,7 +8,17 @@ let rzState = {
   expectedWorking: 0
 }
 
+/* PERF: Cache state.json result with a short TTL. The home page is re-rendered
+ * on multiple occasions (loadOnceView + onceViewAfterUpdate), and each render
+ * previously issued a separate cat of state.json. Reuse the result for 1.5s. */
+let _stateCache = null
+let _stateCacheTs = 0
+const _STATE_TTL_MS = 1500
+
 async function _getReZygiskState() {
+  const now = Date.now()
+  if (_stateCache && (now - _stateCacheTs) < _STATE_TTL_MS) return _stateCache
+
   let stateCmd = await exec('/system/bin/cat /data/adb/rezygisk/state.json')
   if (stateCmd.errno !== 0) {
     toast('Error getting state of ReZygisk!')
@@ -17,55 +27,42 @@ async function _getReZygiskState() {
   }
 
   try {
-    const ReZygiskState = JSON.parse(stateCmd.stdout)
-    return ReZygiskState
+    _stateCache = JSON.parse(stateCmd.stdout)
+    _stateCacheTs = now
+    return _stateCache
   } catch {
     return null;
   }
 }
 
-async function _getVersion() {
-  let moduleProp = await exec('cat /data/adb/modules/rezygisk/module.prop')
-  if (moduleProp.errno !== 0) {
-    toast('Error getting state of ReZygisk!')
-
-    return;
-  }
+/* PERF: Static device info (kernel, android version, module version) rarely
+ * changes during a WebUI session. Cache it for the lifetime of the page. */
+let _staticInfoCache = null
+async function _getStaticInfo() {
+  if (_staticInfoCache) return _staticInfoCache
+  const [moduleProp, unameCmd, androidVersionCmd] = await Promise.all([
+    exec('cat /data/adb/modules/rezygisk/module.prop'),
+    exec('/system/bin/uname -r'),
+    exec('/system/bin/getprop ro.build.version.release')
+  ])
 
   let version = '???'
-  moduleProp.stdout.split('\n').forEach((line) => {
-    if (line.startsWith('version=')) version = line.split('=')[1]
-  })
-
-  return version
-}
-
-async function _getKernelString() {
-  const unameCmd = await exec('/system/bin/uname -r')
-  if (unameCmd.errno !== 0) {
-    toast('Error getting kernel version!')
-    return '???'
-  }
-
-  if (unameCmd.stdout && unameCmd.stdout.length !== 0) {
-    return unameCmd.stdout.trim()
+  if (moduleProp.errno === 0) {
+    moduleProp.stdout.split('\n').forEach((line) => {
+      if (line.startsWith('version=')) version = line.split('=')[1]
+    })
   } else {
-    return '???'
-  }
-}
-
-async function _getAndroidVersion() {
-  const androidVersionCmd = await exec('/system/bin/getprop ro.build.version.release')
-  if (androidVersionCmd.errno !== 0) {
-    toast('Error getting android version!')
-    return '???'
+    toast('Error getting state of ReZygisk!')
   }
 
-  if (androidVersionCmd.stdout && androidVersionCmd.stdout.length !== 0) {
-    return androidVersionCmd.stdout
-  } else {
-    return '???'
-  }
+  const kernelVersion = (unameCmd.errno === 0 && unameCmd.stdout && unameCmd.stdout.length !== 0)
+    ? unameCmd.stdout.trim() : '???'
+
+  const androidVersion = (androidVersionCmd.errno === 0 && androidVersionCmd.stdout && androidVersionCmd.stdout.length !== 0)
+    ? androidVersionCmd.stdout : '???'
+
+  _staticInfoCache = { version, kernelVersion, androidVersion }
+  return _staticInfoCache
 }
 
 async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
@@ -162,13 +159,17 @@ export async function loadOnce() {
 }
 
 export async function loadOnceView() {
-  document.getElementById('version_code').innerHTML = await _getVersion()
+  /* PERF: Parallelize static info fetch with state and strings fetch, instead
+   * of awaiting three sequential exec() calls. */
+  const [staticInfo, ReZygiskState, strings] = await Promise.all([
+    _getStaticInfo(),
+    _getReZygiskState(),
+    getStrings(whichCurrentPage())
+  ])
 
-  document.getElementById('kernel_version_div').innerHTML = await _getKernelString()
-  document.getElementById('android_version_div').innerHTML = await _getAndroidVersion()
-
-  const ReZygiskState = await _getReZygiskState()
-  const strings = await getStrings(whichCurrentPage())
+  document.getElementById('version_code').innerHTML = staticInfo.version
+  document.getElementById('kernel_version_div').innerHTML = staticInfo.kernelVersion
+  document.getElementById('android_version_div').innerHTML = staticInfo.androidVersion
 
   let root_impl = ReZygiskState ? ReZygiskState.root : null
   if (!root_impl) root_impl = strings.unknown

@@ -70,6 +70,10 @@
         "fridaTracesHiding": {
           "title": "Frida 痕迹隐藏",
           "description": "隐藏 Frida 相关痕迹以避免检测（实验性）。"
+        },
+        "overlayfsHiding": {
+          "title": "OverlayFS 挂载隐藏",
+          "description": "卸载 overlay（ext4 后端）模块挂载点，避免在 mountinfo 中泄露 root 痕迹。"
         }
       }
     },

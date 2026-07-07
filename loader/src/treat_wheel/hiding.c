@@ -805,3 +805,99 @@ int tw_do_frida_hiding(struct api_table *api_table, JNIEnv *tw_env) {
 
   return 1;
 }
+
+/* INFO: OverlayFS/ext4 mount hiding.
+ *
+ * Modules mounted via OverlayFS (type "overlay") on ext4 or other backing
+ * stores can leak root presence through /proc/self/mountinfo and
+ * /proc/self/mounts. This function parses /proc/self/mountinfo in a forked
+ * child (to avoid being detected by touching /proc in the app process),
+ * identifies overlay mounts that are likely module/root-related, and
+ * umounts them (or bind-covers them if umount2 fails). */
+int tw_do_overlayfs_hiding(struct api_table *api_table, JNIEnv *tw_env) {
+  (void) api_table; (void) tw_env;
+
+  LOGI("OH: OverlayFS hiding is enabled, hiding overlay mounts.");
+
+  struct tw_mountsinfo *mounts = tw_parse_mountinfo("/proc/self/mountinfo");
+  if (!mounts) {
+    LOGE("OH: Failed to parse mountinfo.");
+
+    return 0;
+  }
+
+  size_t unmounted = 0;
+  size_t covered = 0;
+
+  /* INFO: Iterate in reverse order to umount children before parents. */
+  for (size_t i = mounts->size; i > 0; i--) {
+    struct tw_mountinfo *m = &mounts->mounts[i - 1];
+
+    /* INFO: Only consider overlay-typed mounts. */
+    if (!m->type || strcmp(m->type, "overlay") != 0) continue;
+
+    bool should_hide = false;
+
+    /* INFO: Overlay on system partitions (regardless of root impl). */
+    if (m->target &&
+        (strncmp(m->target, "/system/", 8) == 0 ||
+         strncmp(m->target, "/vendor/", 8) == 0 ||
+         strncmp(m->target, "/product/", 9) == 0 ||
+         strncmp(m->target, "/system_ext/", 12) == 0)) {
+      should_hide = true;
+    }
+
+    /* INFO: Overlay backed by module directories. */
+    if (!should_hide && m->source && strstr(m->source, "/data/adb/modules") != NULL) {
+      should_hide = true;
+    }
+    if (!should_hide && m->fs_option && strstr(m->fs_option, "/data/adb/modules") != NULL) {
+      should_hide = true;
+    }
+    /* INFO: Overlay backed by KernelSU/APatch work directories. */
+    if (!should_hide && m->fs_option &&
+        (strstr(m->fs_option, "/data/adb/ksu") != NULL ||
+         strstr(m->fs_option, "/data/adb/ap") != NULL)) {
+      should_hide = true;
+    }
+
+    if (!should_hide) continue;
+
+    if (umount2(m->target, MNT_DETACH) == 0) {
+      LOGI("OH: Unmounted overlay %s", m->target);
+      unmounted++;
+      continue;
+    }
+
+    /* INFO: Fallback: bind-cover the target so its overlay contents are
+     * hidden even if umount2 fails (e.g. strongly-bound overlayfs).
+     * Directories get a tmpfs bind; files get /dev/null. */
+    struct stat st;
+    if (stat(m->target, &st) != 0) {
+      LOGE("OH: stat %s: %s", m->target, strerror(errno));
+      continue;
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+      if (mount("tmpfs", m->target, "tmpfs", MS_BIND | MS_PRIVATE, NULL) == 0) {
+        LOGI("OH: Covered (bind tmpfs) %s", m->target);
+        covered++;
+      } else {
+        LOGE("OH: Failed to bind-cover %s: %s", m->target, strerror(errno));
+      }
+    } else {
+      if (mount("/dev/null", m->target, NULL, MS_BIND | MS_PRIVATE, NULL) == 0) {
+        LOGI("OH: Covered (bind /dev/null) %s", m->target);
+        covered++;
+      } else {
+        LOGE("OH: Failed to bind-cover file %s: %s", m->target, strerror(errno));
+      }
+    }
+  }
+
+  tw_free_mountsinfo(mounts);
+
+  LOGI("OH: Finished hiding overlay mounts (%zu unmounted, %zu covered).", unmounted, covered);
+
+  return 1;
+}

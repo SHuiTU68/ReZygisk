@@ -251,75 +251,78 @@ function unuseHTML(page, pageId, shouldRemoveListeners = true) {
 }
 
 async function loadPages() {
-  return new Promise((resolve) => {
-    /*
-      INFO: Usually dynamic HTML leads to a lot of visual problems, which
-              can vary from missing CSS for an extremely brief moment to
-              a full page re-rendering. This is why we load all pages at
-              once and then we just switch between them.
-    */
+  /*
+    INFO: Usually dynamic HTML leads to a lot of visual problems, which
+            can vary from missing CSS for an extremely brief moment to
+            a full page re-rendering. This is why we load all pages at
+            once and then we just switch between them.
 
-    let amountLoaded = 0
-    allPages.forEach(async (page) => {
-      const pageHTML = await loadHTML(page)
-      if (pageHTML === false) {
-        toast('Error loading page')
+    PERF: Fetch HTML, scripts, and CSS for all pages concurrently via
+            Promise.all, rather than sequentially awaiting each fetch
+            inside forEach (the original code awaited inside an async
+            forEach, which serializes network round-trips).
+  */
+
+  const pageResults = await Promise.all(allPages.map(async (page) => {
+    const [ pageHTML, pageJSScripts, cssData ] = await Promise.all([
+      loadHTML(page),
+      getPageScripts(page),
+      getPageCSS(page)
+    ])
+    return { page, pageHTML, pageJSScripts, cssData }
+  }))
+
+  const pageContent = document.getElementById('page_content')
+  const firstScript = document.getElementsByTagName('script')[0]
+
+  for (const { page, pageHTML, pageJSScripts, cssData } of pageResults) {
+    if (pageHTML === false) {
+      toast('Error loading page')
+      continue
+    }
+    if (pageJSScripts === false) {
+      toast(`Error while loading ${page} scripts`)
+      continue
+    }
+
+    const pageSpecificContent = document.createElement('div')
+    pageSpecificContent.id = `${page}_content`
+    pageSpecificContent.innerHTML = pageHTML
+    pageSpecificContent.style.display = 'none'
+    if (isMiniPage(page)) pageSpecificContent.classList.add('page_loader_mini_layer')
+
+    pageContent.appendChild(pageSpecificContent)
+    unuseHTML(pageSpecificContent, page)
+
+    if (cssData) {
+      const cssCode = document.createElement('style')
+      cssCode.id = `${page}_css`
+      cssCode.innerHTML = cssData
+      cssCode.media = 'not all'
+
+      head.appendChild(cssCode)
+    }
+
+    pageJSScripts.split('\n').forEach((line) => {
+      if (line.length === 0) return;
+
+      const jsCode = document.createElement('script')
+      jsCode.src = line
+      jsCode.type = 'module'
+      jsCode.id = `${page}_js`
+
+      if (!firstScript) {
+        head.appendChild(jsCode)
 
         return;
       }
 
-      const pageJSScripts = await getPageScripts(page)
-      if (pageJSScripts === false) {
-        toast(`Error while loading ${page} scripts`)
-
-        return;
-      }
-
-      const pageContent = document.getElementById('page_content')
-      const pageSpecificContent = document.createElement('div')
-      pageSpecificContent.id = `${page}_content`
-      pageSpecificContent.innerHTML = pageHTML
-      pageSpecificContent.style.display = 'none'
-      if (isMiniPage(page)) pageSpecificContent.classList.add('page_loader_mini_layer')
-
-      pageContent.appendChild(pageSpecificContent)
-      unuseHTML(pageSpecificContent, page)
-
-      const cssData = await getPageCSS(page)
-      if (cssData) {
-        const cssCode = document.createElement('style')
-        cssCode.id = `${page}_css`
-        cssCode.innerHTML = cssData
-        cssCode.media = 'not all'
-
-        head.appendChild(cssCode)
-      }
-
-      pageJSScripts.split('\n').forEach((line) => {
-        if (line.length === 0) return;
-
-        const jsCode = document.createElement('script')
-        jsCode.src = line
-        jsCode.type = 'module'
-        jsCode.id = `${page}_js`
-
-        const first = document.getElementsByTagName('script')[0]
-        if (!first) {
-          head.appendChild(jsCode)
-
-          return;
-        }
-
-        first.parentNode.insertBefore(jsCode, first)
-      })
-
-      const pageJS = importPageJS(page)
-      pageJS.then((module) => module.loadOnce())
-
-      amountLoaded++
-      if (amountLoaded === allPages.length) resolve()
+      firstScript.parentNode.insertBefore(jsCode, first)
     })
-  })
+
+    /* PERF: Kick off module loadOnce without blocking the loop. */
+    importPageJS(page).then((module) => module.loadOnce())
+  }
 }
 
 function revertHTMLUnuse(page, pageId) {
@@ -596,33 +599,54 @@ export async function reloadPage() {
   utils.reapplyListeners()
 }
 
+/* PERF: In-memory cache for parsed language JSON. The original code re-fetched
+ * and re-parsed the language JSON on every page switch (and every reloadPage),
+ * causing redundant I/O. The language file changes only on setLanguage(), which
+ * clears the cache. */
+const _stringsCache = new Map()
+function _invalidateStringsCache() { _stringsCache.clear() }
+
 export function getStrings(pageId, forceDefault = false) {
-  return fetch(`lang/${forceDefault ? 'en_US' : (localStorage.getItem(`/${moduleName}/language`) || 'en_US')}.json`)
-    .then((response) => response.json())
-    .then((data) => {
-      return {
-        ...data.pages[pageId],
-        ...data.globals,
-        navbar: Object.fromEntries(allPages.map((page) => [page, data.pages[page].title]))
-      }
-    })
-    .catch((err) => {
-      if (!forceDefault) {
-        toast('Error loading strings for the selected language, loading default (en_US) strings.')
+  const langId = forceDefault ? 'en_US' : (localStorage.getItem(`/${moduleName}/language`) || 'en_US')
 
-        return getStrings(pageId, true)
-      }
+  let langData = _stringsCache.get(langId)
+  if (!langData) {
+    langData = fetch(`lang/${langId}.json`)
+      .then((response) => response.json())
+      .then((data) => {
+        _stringsCache.set(langId, Promise.resolve(data))
+        return data
+      })
+      .catch((err) => {
+        if (!forceDefault) {
+          toast('Error loading strings for the selected language, loading default (en_US) strings.')
 
-      toast('Error loading default strings!')
-      console.error(`Failed to load default strings for page ${pageId}: `, err)
+          return getStrings(pageId, true)
+        }
 
-      return false
-    })
+        toast('Error loading default strings!')
+        console.error(`Failed to load default strings for page ${pageId}: `, err)
+
+        return false
+      })
+    /* INFO: Store the in-flight promise so concurrent callers share one fetch. */
+    _stringsCache.set(langId, langData)
+  }
+
+  return Promise.resolve(langData).then((data) => {
+    if (!data) return false
+    return {
+      ...data.pages[pageId],
+      ...data.globals,
+      navbar: Object.fromEntries(allPages.map((page) => [page, data.pages[page].title]))
+    }
+  })
 }
 
 export function setLanguage(langId) {
   localStorage.setItem(`/${moduleName}/language`, langId)
 
+  _invalidateStringsCache()
   sufferedUpdate.length = 0
 }
 

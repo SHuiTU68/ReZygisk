@@ -790,6 +790,37 @@ bool umount_root(struct root_impl impl) {
            strncmp(mount.target, "/system_ext/", 12) == 0)) should_unmount = true;
     }
 
+    /* INFO: Generic overlayfs hiding for all root implementations.
+     * Modules mounted via OverlayFS (type "overlay") on ext4 or other
+     * backing stores can leak root presence through /proc/self/mounts and
+     * /proc/self/mountinfo. Catch overlay mounts on system partitions
+     * regardless of the root implementation, plus overlay mounts whose
+     * source or fs_option references the module directory. */
+    if (strcmp(mount.type, "overlay") == 0) {
+      if (strncmp(mount.target, "/system/", 8) == 0 ||
+          strncmp(mount.target, "/vendor/", 8) == 0 ||
+          strncmp(mount.target, "/product/", 9) == 0 ||
+          strncmp(mount.target, "/system_ext/", 12) == 0) {
+        should_unmount = true;
+      }
+      /* INFO: Overlay backed by /data/adb/modules (KernelSU/APatch module
+       * overlayfs) - detect via source or fs_options containing the
+       * module dir path. */
+      if (mount.source && strstr(mount.source, "/data/adb/modules") != NULL) {
+        should_unmount = true;
+      }
+      if (mount.fs_option && strstr(mount.fs_option, "/data/adb/modules") != NULL) {
+        should_unmount = true;
+      }
+      /* INFO: Overlay backed by /data/adb/ksu (KernelSU Next) or
+       * /data/adb/ap (APatch) work directories. */
+      if (mount.fs_option &&
+          (strstr(mount.fs_option, "/data/adb/ksu") != NULL ||
+           strstr(mount.fs_option, "/data/adb/ap") != NULL)) {
+        should_unmount = true;
+      }
+    }
+
     /* INFO: Match custom targets from umount.list */
     if (!should_unmount) {
       for (size_t c = 0; c < custom_count; c++) {

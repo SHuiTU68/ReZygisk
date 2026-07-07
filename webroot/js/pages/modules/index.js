@@ -3,7 +3,16 @@ import { exec, toast } from '../../kernelsu.js'
 import { whichCurrentPage } from '../navbar.js'
 import { getStrings } from '../pageLoader.js'
 
+/* PERF: Share the state.json cache with home page via a module-level cache.
+ * This avoids re-reading state.json when the user navigates between pages. */
+let _stateCache = null
+let _stateCacheTs = 0
+const _STATE_TTL_MS = 1500
+
 async function _getReZygiskState() {
+  const now = Date.now()
+  if (_stateCache && (now - _stateCacheTs) < _STATE_TTL_MS) return _stateCache
+
   let stateCmd = await exec('/system/bin/cat /data/adb/rezygisk/state.json')
   if (stateCmd.errno !== 0) {
     toast('Error getting state of ReZygisk!')
@@ -12,34 +21,48 @@ async function _getReZygiskState() {
   }
 
   try {
-    const ReZygiskState = JSON.parse(stateCmd.stdout)
-    return ReZygiskState
+    _stateCache = JSON.parse(stateCmd.stdout)
+    _stateCacheTs = now
+    return _stateCache
   } catch {
     return null;
   }
 }
 
 async function _getModuleNames(modules) {
-  const fullCommand = modules.map((mod) => {
-    const propPath = `/data/adb/modules/${mod.id}/module.prop`
+  /* PERF: Read all module.prop files with a single shell invocation using a
+   * for-loop, instead of one grep+cut pipeline per module joined by ';'.
+   * Each join in the old code spawned multiple subprocesses; this version
+   * spawns one subshell that reads the name= line directly. */
+  const idsArg = modules.map((m) => m.id).join(' ')
+  const script = `for id in ${idsArg}; do
+    f="/data/adb/modules/$id/module.prop"
+    if [ -f "$f" ]; then
+      while IFS= read -r line; do
+        case "$line" in name=*) printf '%s\\n' "\${line#name=}"; break;; esac
+      done < "$f"
+    else
+      printf '\\n'
+    fi
+  done`
 
-    return `printf % ; if test -f "${propPath}"; then /system/bin/grep '^name=' "${propPath}" | /system/bin/cut -d '=' -f 2- 2>/dev/null || true; else true; fi ; printf "\\n"`
-  }).join(' ; ')
-
-  const result = await exec(fullCommand)
+  const result = await exec(script)
   if (result.errno !== 0) {
     setError('getModuleNames', 'Failed to execute command to retrieve module list names')
 
     return null
   }
 
-  return result.stdout.split('\n\n')
+  return result.stdout.split('\n')
 }
 
 async function _updateDynamicElement() {
-  const ReZygiskState = await _getReZygiskState()
+  /* PERF: Fetch state and strings in parallel. */
+  const [ReZygiskState, strings] = await Promise.all([
+    _getReZygiskState(),
+    getStrings(whichCurrentPage())
+  ])
   const all_modules = []
-  const strings = await getStrings(whichCurrentPage())
 
   if (ReZygiskState.rezygiskd) Object.keys(ReZygiskState.rezygiskd).forEach((daemon_bit) => {
     const daemon = ReZygiskState.rezygiskd[daemon_bit]
