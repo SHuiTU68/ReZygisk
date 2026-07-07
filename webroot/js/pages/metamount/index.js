@@ -160,19 +160,28 @@ async function _loadAvailableModules() {
 
 // INFO: Persist all metamodule config to .rz_meta_cfg. The file is sourced by
 // metamount.sh on every boot, so writes take effect on next reboot.
+//
+// IMPORTANT: KernelSU/APatch exec bridge passes the command as a single string
+// and may not handle multi-line here-docs reliably (the heredoc body can be
+// truncated or interpreted as separate commands). We therefore build the
+// entire file content as a single printf argument with literal \n sequences,
+// which the shell expands into newlines. This is a single-line command — robust
+// across exec bridges. Each value is sanitized to avoid shell-injection /
+// quote-breaking: only safe characters are allowed.
 function _writeMetaCfg() {
   const includeList = MetaMountState.includeModules.filter(Boolean).join(' ')
   const allowList = MetaMountState.allowedPartitions.filter(Boolean).join(' ')
   const enabled = MetaMountState.metaEnabled ? 'true' : 'false'
   const mode = MetaMountState.mountMode
   const name = (MetaMountState.fakeName || 'rezygisk').replace(/[^A-Za-z0-9_]/g, '') || 'rezygisk'
-  return exec(`mkdir -p /data/adb/rezygisk && cat > ${MA_CFG_PATH} <<'RZMETACFG'
-enabled=${enabled}
-mount_mode=${mode}
-fake_mount_name=${name}
-allow_partitions="${allowList}"
-include_modules="${includeList}"
-RZMETACFG`)
+  // SAFETY: sanitize list values — only alphanumerics, underscore, hyphen,
+  // dot, space (for the space-separated lists). This prevents shell metachar
+  // injection and quote-breaking in the printf argument.
+  const safeInclude = includeList.replace(/[^A-Za-z0-9_ .\-]/g, '')
+  const safeAllow = allowList.replace(/[^A-Za-z0-9_ .\-]/g, '')
+  // Build file content with \n that printf '%b' will expand.
+  const content = `enabled=${enabled}\\nmount_mode=${mode}\\nfake_mount_name=${name}\\nallow_partitions="${safeAllow}"\\ninclude_modules="${safeInclude}"\\n`
+  return exec(`mkdir -p /data/adb/rezygisk && printf '%b' '${content}' > ${MA_CFG_PATH}`)
 }
 
 // INFO: Sync all UI controls from MetaMountState.
