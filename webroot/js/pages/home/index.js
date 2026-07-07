@@ -65,15 +65,18 @@ async function _getStaticInfo() {
   return _staticInfoCache
 }
 
-// INFO: Detect metamodule activation + read .rz_meta_cfg to show the current
-// mount mode on the home page. Returns null if metamodule is not active (e.g.
-// on Magisk, or KSU/APatch where Hrezygisk isn't the active metamodule).
+// INFO: Detect metamodule activation + read .rz_meta_cfg (user intent) and
+// .rz_meta_status (actual effective mode after probe) to show the current
+// mount mode on the home page. Returns null if metamodule is not active.
+// effectiveMode is what probe actually selected (e.g. "ext4" when "auto"
+// was configured). mode is the user-configured mode.
 let _metaMountCache = null
 async function _getMetaMountInfo() {
   if (_metaMountCache) return _metaMountCache
-  const [linkR, cfgR] = await Promise.all([
+  const [linkR, cfgR, statusR] = await Promise.all([
     exec('readlink /data/adb/metamodule 2>/dev/null'),
-    exec('cat /data/adb/rezygisk/.rz_meta_cfg 2>/dev/null')
+    exec('cat /data/adb/rezygisk/.rz_meta_cfg 2>/dev/null'),
+    exec('cat /data/adb/rezygisk/.rz_meta_status 2>/dev/null')
   ])
   const active = (linkR.errno === 0 && /rezygisk$/.test(linkR.stdout.trim()))
   let enabled = false
@@ -87,7 +90,18 @@ async function _getMetaMountInfo() {
       }
     })
   }
-  _metaMountCache = { active, enabled, mode }
+  // INFO: Read the actual effective mode written by metamount.sh after probe.
+  // This lets us show "auto (ext4)" when auto resolved to ext4 at boot.
+  let effectiveMode = ''
+  if (statusR.errno === 0) {
+    statusR.stdout.split('\n').forEach((line) => {
+      if (line.match(/^effective_mode=(.+)$/)) {
+        const v = line.split('=')[1].trim()
+        if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') effectiveMode = v
+      }
+    })
+  }
+  _metaMountCache = { active, enabled, mode, effectiveMode }
   return _metaMountCache
 }
 
@@ -212,10 +226,19 @@ export async function loadOnceView() {
     metaClassEl.style.display = 'block'
     metaRowEl.style.display = 'block'
     if (metaStatusEl) {
-      const modeLabel = strings.info.metaMount.modes[metaMount.mode] || metaMount.mode
-      metaStatusEl.innerHTML = metaMount.enabled
-        ? `${strings.info.metaMount.enabled} · ${modeLabel}`
-        : strings.info.metaMount.disabled
+      if (!metaMount.enabled) {
+        metaStatusEl.innerHTML = strings.info.metaMount.disabled
+      } else {
+        // INFO: Show configured mode; if effective mode differs (e.g. auto
+        // resolved to ext4), append it in parentheses: "auto (ext4)".
+        const configuredLabel = strings.info.metaMount.modes[metaMount.mode] || metaMount.mode
+        let label = configuredLabel
+        if (metaMount.effectiveMode && metaMount.effectiveMode !== metaMount.mode) {
+          const effLabel = strings.info.metaMount.modes[metaMount.effectiveMode] || metaMount.effectiveMode
+          label = `${configuredLabel} (${effLabel})`
+        }
+        metaStatusEl.innerHTML = `${strings.info.metaMount.enabled} · ${label}`
+      }
     }
   }
 

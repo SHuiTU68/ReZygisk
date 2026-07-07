@@ -42,6 +42,10 @@ MODDIR=${0%/*}
 
 LOGFILE=/data/adb/rezygisk/.rz_meta.log
 CFG=/data/adb/rezygisk/.rz_meta_cfg
+# INFO: Runtime status file. Written AFTER probe so the WebUI/home page can
+# show the ACTUAL effective mode (e.g. "auto" resolved to "ext4"). This is
+# distinct from CFG (user intent) — STATUS reflects what really happened.
+STATUS=/data/adb/rezygisk/.rz_meta_status
 RW_BASE=/data/adb/rezygisk/.rw
 EXT4_IMG_SIZE_MB=256
 
@@ -211,22 +215,61 @@ _try_setup_ext4() {
   mkdir -p "$RW_BASE" 2>/dev/null
   mkdir -p "$mnt" 2>/dev/null || return 1
 
+  # INFO: Create a SPARSE image instead of writing 256MB of zeros.
+  # `dd seek=` (or truncate) creates a sparse file: the filesystem reports
+  # 256MB logical size but allocates blocks lazily as they are written. This
+  # avoids writing 256MB of zeros upfront → far less flash wear, and faster
+  # creation. mke2fs with sparse_super + uninit_bg keeps the on-disk metadata
+  # sparse-friendly too.
   if [ ! -f "$img" ]; then
-    _meta_log "ext4: creating image $img (${EXT4_IMG_SIZE_MB}MB)"
-    if ! dd if=/dev/zero of="$img" bs=1M count="$EXT4_IMG_SIZE_MB" 2>/dev/null; then
-      _meta_log "ext4: dd failed"
+    _meta_log "ext4: creating sparse image $img (${EXT4_IMG_SIZE_MB}MB)"
+    # Create sparse file: bs=1 count=0 seek=N grows it logically without
+    # writing any data blocks. Equivalent to `truncate -s` but more portable.
+    if ! dd if=/dev/null of="$img" bs=1M count=0 seek="$EXT4_IMG_SIZE_MB" 2>/dev/null; then
+      _meta_log "ext4: sparse dd failed"
       return 1
     fi
-    if ! "$mke2fs_bin" -t ext4 -F "$img" >/dev/null 2>&1; then
+    # INFO: Format with ext4 optimizations to reduce write amplification:
+    #   -O sparse_super      fewer superblock backups → less metadata writes
+    #   -O uninit_bg         uninitialized block groups → no zeroing needed
+    #   -O extent            extent-based blocks → better locality, less fragmentation
+    #   -O dir_index         htree directory indexing → faster lookups
+    #   -O large_file         support large files
+    #   -O huge_file          allow very large files
+    #   -O dir_nlink          unlimited subdirectory links
+    #   -O extra_isize        larger inodes for future features
+    #   -E lazy_itable_init   lazy inode table init → less upfront writes
+    #   -E lazy_journal_init  lazy journal init → less upfront writes
+    #   -b 4096               4K block size (matches typical flash page size)
+    #   -T largefile          fewer inodes, larger blocks (modules have few
+    #                         large files, not many small ones)
+    #   -m 0                  no reserved blocks (this is not a root fs)
+    #   -J size=4             small 4MB journal (data is recreatable)
+    if ! "$mke2fs_bin" -t ext4 -F -b 4096 -T largefile -m 0 -J size=4 \
+      -O sparse_super,uninit_bg,extent,dir_index,large_file,huge_file,dir_nlink,extra_isize \
+      -E lazy_itable_init,lazy_journal_init \
+      "$img" >/dev/null 2>&1; then
       _meta_log "ext4: mke2fs failed"
       rm -f "$img" 2>/dev/null
       return 1
     fi
   fi
 
-  if ! mount -t ext4 -o loop "$img" "$mnt" 2>/dev/null; then
-    _meta_log "ext4: loop mount failed"
-    return 1
+  # INFO: Mount with performance + wear-reduction options:
+  #   noatime     don't update access times → eliminates a write per read
+  #   nodiratime  don't update dir access times (subset of noatime, explicit)
+  #   delalloc    delay block allocation → better layout, less fragmentation
+  #   commit=60   flush journal every 60s instead of 5s default → fewer writes
+  #   nobarrier   disable write barriers (safe here: data is recreatable from
+  #               modules; barriers cost flush commands that add wear)
+  #   errors=continue  don't remount-ro on error (keep system booting)
+  if ! mount -t ext4 -o loop,noatime,nodiratime,delalloc,commit=60,nobarrier,errors=continue "$img" "$mnt" 2>/dev/null; then
+    # Fallback: some kernels reject nobarrier; retry with safer options
+    _meta_log "ext4: optimized mount failed, retrying with defaults"
+    if ! mount -t ext4 -o loop,noatime,delalloc,errors=continue "$img" "$mnt" 2>/dev/null; then
+      _meta_log "ext4: loop mount failed"
+      return 1
+    fi
   fi
 
   STAGE="$mnt"
@@ -235,6 +278,10 @@ _try_setup_ext4() {
 
 _probe_mount_mode() {
   local order mode
+  # INFO: Remember the user's configured mode before probe overwrites
+  # MOUNT_MODE with the actually-resolved mode. This lets us report
+  # "configured=auto, effective=ext4" to the WebUI.
+  CONFIG_MODE="$MOUNT_MODE"
   case "$MOUNT_MODE" in
     tmpfs)  order="tmpfs ext4 direct";;
     ext4)   order="ext4 tmpfs direct";;
@@ -277,9 +324,20 @@ _probe_mount_mode() {
 
 _probe_mount_mode
 
+# INFO: Write runtime status file so WebUI/home page can display the EFFECTIVE
+# mount mode (e.g. "auto" resolved to "ext4"). Written here, after probe, so
+# the actual mode is recorded even if later per-partition mounts fail.
+cat > "$STATUS" <<RASTAT
+configured_mode=$CONFIG_MODE
+effective_mode=$MOUNT_MODE
+source=$SOURCE
+mount_mode_stage=$STAGE
+RASTAT
+
 # INFO: For each partition, merge whitelisted modules into upperdir and overlay
 # mount. As the active metamodule, this is OUR job — KSU/APatch do not mount
 # modules themselves when metamodule=1 is set.
+MOUNTED_PARTITIONS=""
 for P in $PARTITIONS; do
   lower="/$P"
 
@@ -343,10 +401,17 @@ for P in $PARTITIONS; do
 
   if mount -t overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$SOURCE" "$lower" 2>/dev/null; then
     _meta_log "mounted overlay on $lower (source=$SOURCE mode=$MOUNT_MODE upper=$upper)"
+    MOUNTED_PARTITIONS="$MOUNTED_PARTITIONS $P"
   else
     _meta_log "FAIL $P: mount -t overlay returned $?"
   fi
 done
 
-_meta_log "metamount done"
+# INFO: Append the list of actually-mounted partitions to the status file so
+# the WebUI can show which partitions are currently overlaid.
+cat >> "$STATUS" <<RASTAT2
+mounted_partitions=$(echo $MOUNTED_PARTITIONS)
+RASTAT2
+
+_meta_log "metamount done (effective_mode=$MOUNT_MODE mounted=[$MOUNTED_PARTITIONS])"
 exit 0

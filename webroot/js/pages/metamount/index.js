@@ -16,6 +16,7 @@ const MetaMountState = {
   isMetamodule: false,
   metaEnabled: false,
   mountMode: 'auto',
+  effectiveMode: '',
   fakeName: 'rezygisk',
   allowedPartitions: [],
   includeModules: [],
@@ -29,6 +30,25 @@ const MetaMountState = {
 async function _loadMetamoduleStatus() {
   const r = await exec('readlink /data/adb/metamodule 2>/dev/null')
   MetaMountState.isMetamodule = (r.errno === 0 && /rezygisk$/.test(r.stdout.trim()))
+}
+
+// INFO: Read runtime status file written by metamount.sh after probe. This
+// contains the ACTUAL effective mount mode (e.g. "ext4" when "auto" was
+// configured), so the UI can show "auto (ext4)". Also contains the list of
+// mounted partitions.
+async function _loadMetaStatus() {
+  MetaMountState.effectiveMode = ''
+  const r = await exec('cat /data/adb/rezygisk/.rz_meta_status 2>/dev/null')
+  if (r.errno !== 0) return
+  r.stdout.split('\n').forEach((line) => {
+    const em = line.match(/^effective_mode=(.+)$/)
+    if (em) {
+      const v = em[1].trim()
+      if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') {
+        MetaMountState.effectiveMode = v
+      }
+    }
+  })
 }
 
 // INFO: Read all metamodule config from .rz_meta_cfg. Format (sourced by
@@ -174,6 +194,21 @@ function _syncUI() {
   if (enabledSwitch) enabledSwitch.checked = MetaMountState.metaEnabled
   if (modeSelect) modeSelect.value = MetaMountState.mountMode
   if (nameInput) nameInput.value = MetaMountState.fakeName
+
+  // INFO: Show the effective mode (actual mode after boot probe) when it
+  // differs from the configured mode. E.g. configured "auto" → effective
+  // "ext4" displays "auto → ext4".
+  const effEl = document.getElementById('ma_effective_mode')
+  if (effEl) {
+    if (MetaMountState.effectiveMode &&
+        MetaMountState.effectiveMode !== MetaMountState.mountMode &&
+        MetaMountState.metaEnabled) {
+      effEl.style.display = 'block'
+      effEl.innerText = `${MetaMountState.mountMode} → ${MetaMountState.effectiveMode}`
+    } else {
+      effEl.style.display = 'none'
+    }
+  }
 }
 
 // INFO: Build the module list DOM. A checked checkbox means the module IS in
@@ -332,6 +367,7 @@ export async function onceViewAfterUpdate() {
 export async function load() {
   await _loadMetamoduleStatus()
   await _loadMetaCfg()
+  await _loadMetaStatus()
   await _loadAvailableModules()
   _syncUI()
   _renderPartitionList()
