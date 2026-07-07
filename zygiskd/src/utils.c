@@ -772,6 +772,34 @@ bool umount_root(struct root_impl impl) {
     if (umount2(target, MNT_DETACH) == -1) {
       LOGE("[%s] Failed to unmount %s: %s", source_name, target, strerror(errno));
 
+      /* INFO: Fallback for mounts that cannot be detached (e.g. MMrS module
+       * replacements, strongly-bound overlayfs). Instead of leaving the
+       * mount visible to denylisted apps, cover it with a bind mount of an
+       * empty source. This hides the underlying content without actually
+       * unmounting.
+       *
+       * For directory targets, use a tmpfs bind mount (empty).
+       * For file targets, bind mount /dev/null over it. */
+      struct stat st;
+      if (stat(target, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+          /* INFO: Bind-mount a private tmpfs over the directory to hide its
+           * contents. MS_PRIVATE ensures it doesn't propagate. */
+          if (mount("tmpfs", target, "tmpfs", MS_BIND | MS_PRIVATE, NULL) == 0) {
+            LOGI("[%s] Covered (bind) %s with tmpfs", source_name, target);
+          } else {
+            LOGE("[%s] Failed to bind-cover %s: %s", source_name, target, strerror(errno));
+          }
+        } else {
+          /* INFO: File target - cover with /dev/null. */
+          if (mount("/dev/null", target, NULL, MS_BIND | MS_PRIVATE, NULL) == 0) {
+            LOGI("[%s] Covered (bind) %s with /dev/null", source_name, target);
+          } else {
+            LOGE("[%s] Failed to bind-cover file %s: %s", source_name, target, strerror(errno));
+          }
+        }
+      }
+
       continue;
     }
 
