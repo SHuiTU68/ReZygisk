@@ -6,7 +6,7 @@ import { runMainPageTransition, runMiniPageEnter, runMiniPageLeave } from './ani
 /* INFO: Prototypes */
 import utils from './utils.js'
 
-const moduleName = 'ReZygisk'
+const moduleName = 'Hrezygisk'
 const head = document.getElementsByTagName('head')[0]
 const miniPageRegex = /mini_(.*)_(.*)/
 
@@ -419,7 +419,7 @@ export async function loadPage(pageId) {
         const minipage_header = `
           <div class="header" style="padding-left: 20px; display: flex; align-items: center; justify-content: initial;">
             <div id="minipage_close" class="back_icon" style="width: 36px; height: 36px; margin-right: 6px;"></div>
-            <div id="minipage_title">ReZygisk: {{title}}</div>
+            <div id="minipage_title">Hrezygisk: {{title}}</div>
           </div>
         `
         pageSpecificContent.insertAdjacentHTML('afterbegin', minipage_header)

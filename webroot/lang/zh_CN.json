@@ -43,7 +43,7 @@
       "title": "隐藏",
       "description": {
         "title": "Treat Wheel",
-        "text": "集成在 ReZygisk 中的高级隐藏控制。",
+        "text": "集成在 Hrezygisk 中的高级隐藏控制。",
         "note": "更改将在下次启动应用时生效。"
       },
       "features": {

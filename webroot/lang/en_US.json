@@ -43,7 +43,7 @@
       "title": "Hiding",
       "description": {
         "title": "Treat Wheel",
-        "text": "Advanced hiding controls integrated into ReZygisk.",
+        "text": "Advanced hiding controls integrated into Hrezygisk.",
         "note": "Changes take effect on the next app launch."
       },
       "features": {
