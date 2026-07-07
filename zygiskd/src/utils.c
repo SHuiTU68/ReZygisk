@@ -756,6 +756,36 @@ bool umount_root(struct root_impl impl) {
     }
   }
 
+  /* INFO: Check if the user has disabled hiding of our own metamodule mounts
+   * (the overlays created by metamount.sh with source="KSU"/"APatch"). This
+   * flag lives in .rz_cfg alongside the other Treat Wheel disable_* flags.
+   * zygiskd is a separate process from the loader and doesn't share the
+   * loader's parsed config, so we read the file directly here. The result is
+   * cached for the daemon's lifetime — config changes take effect on next
+   * reboot, consistent with the WebUI's "changes take effect on next reboot"
+   * messaging. */
+  static bool meta_mount_hiding_checked = false;
+  static bool meta_mount_hiding_disabled = false;
+  if (!meta_mount_hiding_checked) {
+    meta_mount_hiding_checked = true;
+    FILE *cf = fopen("/data/adb/rezygisk/.rz_cfg", "r");
+    if (cf) {
+      char line[256];
+      while (fgets(line, sizeof(line), cf)) {
+        if (strncmp(line, "disable_meta_mount_hiding=true", 30) == 0) {
+          meta_mount_hiding_disabled = true;
+          break;
+        }
+      }
+      fclose(cf);
+    }
+  }
+  /* INFO: When meta mount hiding is disabled, skip matching by source name for
+   * KSU/APatch (our metamount.sh mounts). Magisk mounts are never ours
+   * (metamount.sh doesn't run on Magisk), so Magisk source/worker matching is
+   * always applied. */
+  bool skip_meta_source = (impl.impl == KernelSU || impl.impl == APatch) && meta_mount_hiding_disabled;
+
   char **targets_to_unmount = NULL;
   size_t num_targets = 0;
 
@@ -764,8 +794,11 @@ bool umount_root(struct root_impl impl) {
 
     bool should_unmount = false;
 
-    /* INFO: Match by source name (magisk/KSU/APatch/worker) */
-    if (strcmp(mount.source, source_name) == 0 || (impl.impl == Magisk && strcmp(mount.source, "worker") == 0)) should_unmount = true;
+    /* INFO: Match by source name (magisk/KSU/APatch/worker). When the user
+     * has disabled meta mount hiding, skip the KSU/APatch source match so our
+     * metamount.sh overlays stay visible to denylist apps. Magisk source and
+     * worker matching is always applied (those are never our mounts). */
+    if ((!skip_meta_source && strcmp(mount.source, source_name) == 0) || (impl.impl == Magisk && strcmp(mount.source, "worker") == 0)) should_unmount = true;
 
     /* INFO: Match module bind mounts */
     if (strncmp(mount.target, "/data/adb/modules", strlen("/data/adb/modules")) == 0) should_unmount = true;

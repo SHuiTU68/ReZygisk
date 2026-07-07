@@ -94,6 +94,8 @@ static void tw_load_state(void) {
       g_tw_state.disable_frida_traces_hiding = strncmp(line + strlen("disable_frida_traces_hiding="), "true", 4) == 0;
     } else if (tw_str_starts_with(line, "disable_env_sanitization=")) {
       g_tw_state.disable_env_sanitization = strncmp(line + strlen("disable_env_sanitization="), "true", 4) == 0;
+    } else if (tw_str_starts_with(line, "disable_meta_mount_hiding=")) {
+      g_tw_state.disable_meta_mount_hiding = strncmp(line + strlen("disable_meta_mount_hiding="), "true", 4) == 0;
     }
   }
 
@@ -195,6 +197,7 @@ bool tw_adapter_is_enabled(const char *feature) {
   if (strcmp(feature, "module_loading_traces_hiding") == 0) return !g_tw_state.disable_module_loading_traces_hiding;
   if (strcmp(feature, "frida_traces_hiding") == 0) return !g_tw_state.disable_frida_traces_hiding;
   if (strcmp(feature, "env_sanitization") == 0) return !g_tw_state.disable_env_sanitization;
+  if (strcmp(feature, "meta_mount_hiding") == 0) return !g_tw_state.disable_meta_mount_hiding;
 
   return false;
 }

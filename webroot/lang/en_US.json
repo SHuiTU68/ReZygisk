@@ -74,6 +74,10 @@
         "envSanitization": {
           "title": "Environment Sanitization",
           "description": "Clear LD_PRELOAD, MAGISK_*, and other root-related environment variables from app processes."
+        },
+        "metaMountHiding": {
+          "title": "Hide Meta Mounts",
+          "description": "Umount Hrezygisk's own metamodule overlay mounts (source=KSU/APatch) for denylist apps. Only relevant on KernelSU/APatch where metamodule is active."
         }
       },
       "metaMount": {

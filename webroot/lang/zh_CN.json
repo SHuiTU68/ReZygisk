@@ -74,6 +74,10 @@
         "envSanitization": {
           "title": "环境变量净化",
           "description": "清除 LD_PRELOAD、MAGISK_* 等 root 相关环境变量，防止通过环境变量检测。"
+        },
+        "metaMountHiding": {
+          "title": "隐藏元模块挂载",
+          "description": "为 denylist 应用卸载 Hrezygisk 元模块自身的 overlay 挂载（source=KSU/APatch）。仅在 KernelSU/APatch 元模块激活时有效。"
         }
       },
       "metaMount": {
