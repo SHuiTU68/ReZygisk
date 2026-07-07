@@ -681,6 +681,27 @@ bool umount_root(struct root_impl impl) {
 
   LOGI("[%s] Unmounting root", source_name);
 
+  /* INFO: Load custom umount targets from config file. Each line is a mount
+   * target path to additionally unmount. This allows users to specify custom
+   * mount points (e.g. overlayfs from modules) that aren't caught by the
+   * built-in heuristics below. */
+  char *custom_targets[64];
+  size_t custom_count = 0;
+  {
+    FILE *cf = fopen("/data/adb/rezygisk/umount.list", "r");
+    if (cf) {
+      char line[PATH_MAX];
+      while (custom_count < 64 && fgets(line, sizeof(line), cf)) {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = '\0';
+        if (len == 0 || line[0] == '#') continue;
+        custom_targets[custom_count] = strdup(line);
+        if (custom_targets[custom_count]) custom_count++;
+      }
+      fclose(cf);
+    }
+  }
+
   char **targets_to_unmount = NULL;
   size_t num_targets = 0;
 
@@ -688,9 +709,42 @@ bool umount_root(struct root_impl impl) {
     struct mountinfo mount = mounts.mounts[i];
 
     bool should_unmount = false;
+
+    /* INFO: Match by source name (magisk/KSU/APatch/worker) */
     if (strcmp(mount.source, source_name) == 0 || (impl.impl == Magisk && strcmp(mount.source, "worker") == 0)) should_unmount = true;
+
+    /* INFO: Match module bind mounts */
     if (strncmp(mount.target, "/data/adb/modules", strlen("/data/adb/modules")) == 0) should_unmount = true;
     if (strncmp(mount.root, "/adb/modules/", strlen("/adb/modules/")) == 0) should_unmount = true;
+
+    /* INFO: Additional MagicMount/magisk traces to hide:
+     * - Magisk worker tmpfs often mounted on /sbin or similar
+     * - Magisk mirror mounts under /sbin/.magisk
+     * - KernelSU overlayfs mounts with source "overlay" or "KSU"
+     * - APatch module mounts */
+    if (impl.impl == Magisk) {
+      if (strncmp(mount.target, "/sbin/.magisk", strlen("/sbin/.magisk")) == 0) should_unmount = true;
+      if (strcmp(mount.source, "magisk") == 0) should_unmount = true;
+    }
+    if (impl.impl == KernelSU) {
+      /* INFO: KernelSU may use overlayfs; catch overlay-typed mounts on
+       * system partitions that weren't created by the OEM. */
+      if (strcmp(mount.type, "overlay") == 0 &&
+          (strncmp(mount.target, "/system/", 8) == 0 ||
+           strncmp(mount.target, "/vendor/", 8) == 0 ||
+           strncmp(mount.target, "/product/", 9) == 0 ||
+           strncmp(mount.target, "/system_ext/", 12) == 0)) should_unmount = true;
+    }
+
+    /* INFO: Match custom targets from umount.list */
+    if (!should_unmount) {
+      for (size_t c = 0; c < custom_count; c++) {
+        if (strcmp(mount.target, custom_targets[c]) == 0) {
+          should_unmount = true;
+          break;
+        }
+      }
+    }
 
     if (!should_unmount) continue;
 
@@ -701,6 +755,8 @@ bool umount_root(struct root_impl impl) {
       free(targets_to_unmount);
 
       free_mounts(&mounts);
+
+      for (size_t c = 0; c < custom_count; c++) free(custom_targets[c]);
 
       return false;
     }
@@ -725,6 +781,8 @@ bool umount_root(struct root_impl impl) {
   free(targets_to_unmount);
 
   free_mounts(&mounts);
+
+  for (size_t c = 0; c < custom_count; c++) free(custom_targets[c]);
 
   return true;
 }

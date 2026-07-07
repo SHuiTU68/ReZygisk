@@ -1,6 +1,6 @@
 import { exec, toast } from '../../kernelsu.js'
 
-const TW_STATE_PATH = '/data/adb/rezygisk/tw_state'
+const TW_STATE_PATH = '/data/adb/rezygisk/.rz_cfg'
 
 const HidingState = {
   isIgnoring: false,

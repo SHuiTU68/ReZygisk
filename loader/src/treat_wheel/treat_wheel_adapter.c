@@ -20,8 +20,10 @@
  * hiding.c that still reference it. */
 int cfd = -1;
 
-/* INFO: State path inside ReZygisk directory */
-#define TW_STATE_PATH "/data/adb/rezygisk/tw_state"
+/* INFO: State path inside ReZygisk directory. Use a non-obvious name to avoid
+ * leaving detectable traces (the previous "tw_state" name was a clear marker
+ * that Treat Wheel was integrated). */
+#define TW_STATE_PATH "/data/adb/rezygisk/.rz_cfg"
 
 static struct tw_module_state g_tw_state = { 0 };
 static bool g_tw_initialized = false;

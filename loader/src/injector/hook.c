@@ -1125,6 +1125,11 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   if (in_denylist) {
     FLAG_SET(ctx, DO_REVERT_UNMOUNT);
     update_mnt_ns(Clean, false);
+
+    /* INFO: Clear ZYGISK_ENABLED for denylist processes to prevent detection
+     * via /proc/self/environ. Manager processes set this, but denylisted apps
+     * must not inherit or expose it. */
+    unsetenv("ZYGISK_ENABLED");
   }
 
   /* INFO: Executed after setns to ensure a module can update the mounts of an

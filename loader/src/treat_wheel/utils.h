@@ -88,11 +88,6 @@ struct tw_module_state {
   bool disable_frida_traces_hiding;
 };
 
-struct tw_mem_info {
-  uintptr_t start;
-  size_t size;
-};
-
 bool tw_str_starts_with(const char *str, const char *needle);
 
 bool tw_str_ends_with(const char *str, const char *needle);
@@ -145,7 +140,5 @@ time_t tw_mono_sec_now(void);
 #ifdef IS_ZYGISK_LIB
   bool tw_update_mnt_ns(enum mount_namespace_state mns_state);
 #endif
-
-struct tw_mem_info tw_get_mem_info(void);
 
 #endif /* TW_UTILS_H */
