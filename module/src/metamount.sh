@@ -10,17 +10,23 @@
 # Only KernelSU and APatch drive the metamodule hooks; on Magisk this file is
 # never invoked (Magisk ignores metamodule=1 in module.prop).
 #
-# CRITICAL SAFETY RULE: On KernelSU/APatch, the root implementation ALREADY
-# overlays system partitions to mount modules. If metamount.sh tries to overlay
-# them AGAIN, it creates a nested double-overlay that breaks system_server,
-# zygote, and surfaceflinger → black screen → hot reboot → bootloop.
-# Therefore, metamount.sh MUST detect and skip partitions that are already
-# overlay-mounted. This is the primary bootloop prevention mechanism.
+# ROLE: As the active metamodule (module.prop metamodule=1), Hrezygisk
+# REPLACES the root implementation's own module mounting. KSU/APatch do NOT
+# overlay system partitions themselves when a metamodule is active — that is
+# this script's job. So we must NOT skip partitions that happen to already be
+# overlays (those are from earlier boot stages, not from KSU module mounting).
 #
-# Additionally, ALL critical Android partitions (system, vendor, product,
-# system_ext, odm, etc.) are in DANGEROUS_PARTITIONS and excluded by default.
-# The user must explicitly allow each partition via allow_partitions= in
-# .rz_meta_cfg to override this.
+# WHITELIST MODEL: By default NO module is mounted. The user must explicitly
+# add a module id to include_modules in .rz_meta_cfg (via WebUI) for it to be
+# overlaid. This is safer than a blacklist and matches the WebUI "select which
+# modules to mount" UX.
+#
+# SAFETY: Critical Android partitions (system, vendor, product, system_ext,
+# odm, ...) are in DANGEROUS_PARTITIONS and excluded by default. The user must
+# explicitly allow each partition via allow_partitions= to overlay it. This is
+# the primary bootloop prevention — overlaying /system at post-fs-data can
+# break system_server/zygote if the upperdir is not fully visible to all
+# processes at that early stage.
 #
 # Three mount backends (inspired by mountify):
 #   tmpfs — stage on /mnt/vendor/<name> tmpfs, hardest to detect
@@ -57,7 +63,7 @@ ENABLED=false
 MOUNT_MODE=auto
 FAKE_MOUNT_NAME=rezygisk
 EXT4_IMG_SIZE_MB=256
-SKIP_MODULES=""
+INCLUDE_MODULES=""
 if [ -f "$CFG" ]; then
   # shellcheck disable=SC1090
   . "$CFG"
@@ -68,7 +74,7 @@ if [ "$ENABLED" != "true" ]; then
   exit 0
 fi
 
-_meta_log "metamount start: SOURCE=$SOURCE mode=$MOUNT_MODE fake_name=$FAKE_MOUNT_NAME skip=[$SKIP_MODULES]"
+_meta_log "metamount start: SOURCE=$SOURCE mode=$MOUNT_MODE fake_name=$FAKE_MOUNT_NAME include=[$INCLUDE_MODULES]"
 
 # SAFETY: Sanitize FAKE_MOUNT_NAME — only allow alphanumerics + underscore.
 # This prevents path injection into staging paths.
@@ -77,6 +83,9 @@ case "$FAKE_MOUNT_NAME" in
 esac
 [ -z "$FAKE_MOUNT_NAME" ] && FAKE_MOUNT_NAME=rezygisk
 
+# INFO: Whitelist check. A module is mounted ONLY if its id is in
+# INCLUDE_MODULES. Default empty = no modules mounted (safest). This is the
+# inverse of the old skip_modules blacklist.
 _should_mount_module() {
   mod="$1"
   [ -d "$mod" ] || return 1
@@ -86,28 +95,10 @@ _should_mount_module() {
   [ -f "$mod/remove" ] && return 1
 
   modid=$(basename "$mod")
-  case " $SKIP_MODULES " in
-    *" $modid "*) return 1;;
+  # Whitelist: only mount if explicitly included
+  case " $INCLUDE_MODULES " in
+    *" $modid "*) return 0;;
   esac
-
-  return 0
-}
-
-# INFO: Detect whether a mount point is already an overlay mount.
-# On KernelSU/APatch, the root implementation overlays system partitions to
-# mount modules at post-fs-data, BEFORE this script runs. If we try to overlay
-# them again, we create a nested double-overlay that causes bootloops.
-# This function reads /proc/mounts and returns 0 (true) if the given partition
-# is already mounted as an overlay filesystem.
-_is_already_overlay() {
-  _mp="/$1"
-  [ -n "$_mp" ] || return 1
-  while read -r _dev _mountpoint _fstype _rest; do
-    [ "$_mountpoint" = "$_mp" ] || continue
-    case "$_fstype" in
-      overlay) return 0;;
-    esac
-  done < /proc/mounts 2>/dev/null
   return 1
 }
 
@@ -137,15 +128,6 @@ _meta_log "allow_partitions=[$ALLOW_PARTITIONS]"
 # that are known to cause bootloops when overlaid at post-fs-data. Overlaying
 # any of these can break system_server, zygote, surfaceflinger, vold, or
 # SystemUI, causing black screen → hot reboot → bootloop.
-#
-#   system       — framework JARs, system apps
-#   vendor       — HALs, vendor binaries, surfaceflinger dependencies
-#   product      — SystemUI, launcher, product apps
-#   system_ext   — system extensions, permission controllers
-#   odm          — ODM HALs and configurations
-#   vendor_dlkm  — vendor kernel modules
-#   system_dlkm  — system kernel modules
-#   miui/oppo/etc — OEM-specific partitions (Xiaomi, OPPO, etc.)
 DANGEROUS_PARTITIONS="system vendor product system_ext odm vendor_dlkm system_dlkm miui oppo my_preload my_region my_product my_stock my_engineering"
 
 # INFO: Check if a partition name is in the allow list.
@@ -158,6 +140,7 @@ _is_partition_allowed() {
 }
 
 # INFO: Collect partitions to overlay. Only top-level entries under system/.
+# Only partitions referenced by whitelisted modules are considered.
 PARTITIONS=""
 for mod in /data/adb/modules/*; do
   _should_mount_module "$mod" || continue
@@ -168,15 +151,6 @@ for mod in /data/adb/modules/*; do
     case "$pname" in
       ""|*..*|*/*) continue;;
     esac
-
-    # SAFETY: Skip if this partition is ALREADY an overlay mount.
-    # On KSU/APatch, the root implementation already mounted modules via
-    # overlay. Re-overlay causes double-overlay → bootloop. This is the
-    # PRIMARY bootloop prevention.
-    if _is_already_overlay "$pname"; then
-      _meta_log "skip $pname: already an overlay mount (managed by $SOURCE), re-overlay would cause bootloop"
-      continue
-    fi
 
     # SAFETY: Skip dangerous partitions unless explicitly allowed by user.
     _is_dangerous=false
@@ -201,7 +175,7 @@ done
 _meta_log "partitions discovered:[$PARTITIONS]"
 
 # SAFETY: If no partitions, nothing to do. Avoid any mount operations.
-[ -z "$PARTITIONS" ] && { _meta_log "no partitions to mount (all skipped or no modules), exiting"; exit 0; }
+[ -z "$PARTITIONS" ] && { _meta_log "no partitions to mount (no whitelisted modules or all partitions excluded), exiting"; exit 0; }
 
 _try_setup_tmpfs() {
   STAGE="/mnt/vendor/$FAKE_MOUNT_NAME"
@@ -303,7 +277,9 @@ _probe_mount_mode() {
 
 _probe_mount_mode
 
-# INFO: For each partition, merge modules into upperdir and overlay mount.
+# INFO: For each partition, merge whitelisted modules into upperdir and overlay
+# mount. As the active metamodule, this is OUR job — KSU/APatch do not mount
+# modules themselves when metamodule=1 is set.
 for P in $PARTITIONS; do
   lower="/$P"
 
@@ -312,13 +288,6 @@ for P in $PARTITIONS; do
     ""|*..*|*/*) _meta_log "skip unsafe partition name: [$P]"; continue;;
   esac
   [ -d "$lower" ] || { _meta_log "skip $P: $lower not a dir"; continue; }
-
-  # SAFETY: Double-check overlay status right before mounting. The partition
-  # may have been overlaid by KSU/APatch between our initial scan and now.
-  if _is_already_overlay "$P"; then
-    _meta_log "skip $P: became overlay mount before we could act, skipping to avoid bootloop"
-    continue
-  fi
 
   if [ "$MOUNT_MODE" = "direct" ] || [ -z "$STAGE" ]; then
     upper="$RW_BASE/$P/upper"

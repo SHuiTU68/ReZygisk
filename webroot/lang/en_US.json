@@ -96,7 +96,7 @@
     "metamount": {
       "title": "Meta Mount",
       "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
-      "note": "Changes take effect on next reboot. All system partitions are excluded by default. Partitions already overlaid by KernelSU/APatch are auto-skipped to prevent bootloops.",
+      "note": "Changes take effect on next reboot. No module is mounted by default — check the modules you want to mount, and enable the partitions they need.",
       "settings": {
         "enabled": {
           "title": "Enable Meta Mount",
@@ -120,13 +120,13 @@
         "title": "Partition Allow List (DANGEROUS)",
         "description": "All system partitions are excluded by default to prevent bootloops. Toggle a partition to explicitly allow overlaying it. WARNING: enabling any of these can cause bootloops, black screens, or hot reboots.",
         "noPartitions": "No partitions discovered from installed modules.",
-        "note": "On KernelSU/APatch, partitions already overlaid by the root implementation are automatically skipped to prevent double-overlay bootloops."
+        "note": "As the active metamodule, Hrezygisk handles module mounting itself. All system partitions are excluded by default — enable the ones your selected modules need."
       },
       "exclusions": {
-        "title": "Module Exclusions",
-        "description": "Choose which modules should NOT be mounted by Hrezygisk's metamodule.",
+        "title": "Modules to Mount",
+        "description": "Select which modules should be mounted by Hrezygisk's metamodule. Checked = mounted. Unchecked modules are not overlaid.",
         "noModules": "No other modules installed.",
-        "note": "Excluded modules will not be overlaid by metamount.sh."
+        "note": "Only checked modules are overlaid by metamount.sh on next reboot."
       }
     },
     "modules": {

@@ -96,7 +96,7 @@
     "metamount": {
       "title": "元模块挂载",
       "notActive": "元模块未激活。在 KernelSU 或 APatch 上安装以启用。",
-      "note": "更改将在下次重启后生效。所有系统分区默认排除，已挂载的分区自动跳过以防止 bootloop。",
+      "note": "更改将在下次重启后生效。默认不挂载任何模块——勾选要挂载的模块，并启用它们所需的分区。",
       "settings": {
         "enabled": {
           "title": "启用元模块挂载",
@@ -120,13 +120,13 @@
         "title": "分区允许列表（危险）",
         "description": "所有系统分区默认排除以防止 bootloop。逐个开关以显式允许挂载。警告：启用任何分区都可能导致 bootloop、黑屏或热重启。",
         "noPartitions": "未从已安装模块中发现分区。",
-        "note": "在 KernelSU/APatch 上，已被 root 实现挂载的分区会被自动跳过，以防止双重 overlay 导致 bootloop。"
+        "note": "作为激活的元模块，Hrezygisk 自行处理模块挂载。所有系统分区默认排除——请启用所选模块需要的分区。"
       },
       "exclusions": {
-        "title": "模块排除列表",
-        "description": "选择哪些模块不被 Hrezygisk 元模块挂载。",
+        "title": "要挂载的模块",
+        "description": "选择哪些模块由 Hrezygisk 元模块挂载。勾选=挂载，未勾选的模块不会被 overlay。",
         "noModules": "没有其他已安装的模块。",
-        "note": "排除的模块不会被 metamount.sh 挂载。"
+        "note": "只有勾选的模块会在下次重启时由 metamount.sh 挂载。"
       }
     },
     "modules": {

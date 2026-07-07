@@ -7,13 +7,18 @@ const MA_MODULES_DIR = '/data/adb/modules'
 // active metamodule (/data/adb/metamodule symlink resolves to rezygisk), i.e.
 // only on KernelSU/APatch. The other fields mirror .rz_meta_cfg keys that
 // metamount.sh sources on every boot.
+//
+// WHITELIST MODEL: includeModules is a whitelist — a module is mounted ONLY
+// if its id is in the list. Default empty = no modules mounted. This is the
+// inverse of the old skip_modules blacklist: checking a box in the UI now
+// means "mount this module" (intuitive), not "exclude this module".
 const MetaMountState = {
   isMetamodule: false,
   metaEnabled: false,
   mountMode: 'auto',
   fakeName: 'rezygisk',
   allowedPartitions: [],
-  skipModules: [],
+  includeModules: [],
   availableModules: [],
   discoveredPartitions: []
 }
@@ -32,21 +37,28 @@ async function _loadMetamoduleStatus() {
 //   mount_mode=auto|tmpfs|ext4|direct
 //   fake_mount_name=rezygisk
 //   allow_partitions="system vendor product"  (space or comma separated)
-//   skip_modules="id1 id2 id3"
+//   include_modules="id1 id2 id3"             (whitelist of modules to mount)
 // Missing or malformed file => defaults (all disabled for safety).
-// For backward compatibility, allow_system=true is parsed as allow_partitions+=system.
+// For backward compatibility, skip_modules (old blacklist) is parsed and
+// inverted into includeModules (all modules EXCEPT those in skip_modules).
 async function _loadMetaCfg() {
-  MetaMountState.skipModules = []
+  MetaMountState.includeModules = []
   MetaMountState.metaEnabled = false
   MetaMountState.mountMode = 'auto'
   MetaMountState.fakeName = 'rezygisk'
   MetaMountState.allowedPartitions = []
+  let legacySkipModules = null
   const r = await exec(`cat ${MA_CFG_PATH} 2>/dev/null`)
   if (r.errno !== 0) return
   r.stdout.split('\n').forEach((line) => {
-    const sm = line.match(/^skip_modules="(.*)"$/)
-    if (sm) {
-      MetaMountState.skipModules = sm[1].split(/\s+/).filter(Boolean)
+    const im = line.match(/^include_modules="(.*)"$/)
+    if (im) {
+      MetaMountState.includeModules = im[1].split(/[\s,]+/).filter(Boolean)
+      return
+    }
+    const ap = line.match(/^allow_partitions="(.*)"$/)
+    if (ap) {
+      MetaMountState.allowedPartitions = ap[1].split(/[\s,]+/).filter(Boolean)
       return
     }
     const em = line.match(/^enabled=(.+)$/)
@@ -67,25 +79,25 @@ async function _loadMetaCfg() {
       MetaMountState.fakeName = fm[1].trim() || 'rezygisk'
       return
     }
-    const ap = line.match(/^allow_partitions="(.*)"$/)
-    if (ap) {
-      MetaMountState.allowedPartitions = ap[1].split(/[\s,]+/).filter(Boolean)
-      return
-    }
-    // Legacy: allow_system=true => allow system partition
-    const as = line.match(/^allow_system=(.+)$/)
-    if (as && as[1].trim() === 'true') {
-      if (!MetaMountState.allowedPartitions.includes('system')) {
-        MetaMountState.allowedPartitions.push('system')
-      }
+    // Legacy: skip_modules blacklist. Collected and inverted into a whitelist
+    // after module list is loaded (we need to know all module ids first).
+    const sm = line.match(/^skip_modules="(.*)"$/)
+    if (sm) {
+      legacySkipModules = sm[1].split(/[\s,]+/).filter(Boolean)
     }
   })
+  // Stash legacy skip list for inversion during _loadAvailableModules
+  MetaMountState._legacySkipModules = legacySkipModules
 }
 
 // INFO: Scan /data/adb/modules/* for installed modules (excluding rezygisk
 // itself — it is the metamodule, mounting it via itself makes no sense) and
 // read each module.prop for display. Also discover which partitions each
 // module wants to overlay (top-level dirs under system/).
+//
+// Legacy migration: if the config used the old skip_modules blacklist (and
+// include_modules is empty/absent), invert it into a whitelist: every
+// discovered module EXCEPT those in skip_modules becomes included.
 async function _loadAvailableModules() {
   MetaMountState.availableModules = []
   MetaMountState.discoveredPartitions = []
@@ -112,12 +124,24 @@ async function _loadAvailableModules() {
   if (partR.errno === 0) {
     MetaMountState.discoveredPartitions = partR.stdout.split('\n').filter(Boolean)
   }
+
+  // Legacy migration: invert skip_modules blacklist into include_modules
+  // whitelist (only if include_modules was empty and skip_modules existed).
+  const legacy = MetaMountState._legacySkipModules
+  if (legacy && Array.isArray(legacy) && MetaMountState.includeModules.length === 0) {
+    MetaMountState.includeModules = MetaMountState.availableModules
+      .map((m) => m.id)
+      .filter((id) => !legacy.includes(id))
+    delete MetaMountState._legacySkipModules
+    // Persist the migrated whitelist immediately
+    _writeMetaCfg()
+  }
 }
 
 // INFO: Persist all metamodule config to .rz_meta_cfg. The file is sourced by
 // metamount.sh on every boot, so writes take effect on next reboot.
 function _writeMetaCfg() {
-  const skipList = MetaMountState.skipModules.filter(Boolean).join(' ')
+  const includeList = MetaMountState.includeModules.filter(Boolean).join(' ')
   const allowList = MetaMountState.allowedPartitions.filter(Boolean).join(' ')
   const enabled = MetaMountState.metaEnabled ? 'true' : 'false'
   const mode = MetaMountState.mountMode
@@ -127,7 +151,7 @@ enabled=${enabled}
 mount_mode=${mode}
 fake_mount_name=${name}
 allow_partitions="${allowList}"
-skip_modules="${skipList}"
+include_modules="${includeList}"
 RZMETACFG`)
 }
 
@@ -152,8 +176,9 @@ function _syncUI() {
   if (nameInput) nameInput.value = MetaMountState.fakeName
 }
 
-// INFO: Build the exclusion list DOM. A checked checkbox means the module IS
-// in skip_modules (i.e. NOT mounted by metamount.sh).
+// INFO: Build the module list DOM. A checked checkbox means the module IS in
+// include_modules (i.e. WILL be mounted by metamount.sh). This is the intuitive
+// "select which modules to mount" UX — the inverse of the old exclusion list.
 function _renderModuleList() {
   const listEl = document.getElementById('ma_module_list')
   const noModulesEl = document.getElementById('ma_no_modules')
@@ -173,7 +198,7 @@ function _renderModuleList() {
   if (noModulesEl) noModulesEl.style.display = 'none'
 
   for (const mod of MetaMountState.availableModules) {
-    const excluded = MetaMountState.skipModules.includes(mod.id)
+    const included = MetaMountState.includeModules.includes(mod.id)
     const card = document.createElement('div')
     card.className = 'small_card dimc'
     card.style.marginBottom = '0'
@@ -189,13 +214,15 @@ function _renderModuleList() {
       </label>
     `
     const cb = card.querySelector('input[type="checkbox"]')
-    cb.checked = excluded
+    cb.checked = included
     cb.addEventListener('change', () => {
       const id = cb.getAttribute('data-ma-mod-id')
       if (cb.checked) {
-        if (!MetaMountState.skipModules.includes(id)) MetaMountState.skipModules.push(id)
+        if (!MetaMountState.includeModules.includes(id)) {
+          MetaMountState.includeModules.push(id)
+        }
       } else {
-        MetaMountState.skipModules = MetaMountState.skipModules.filter((x) => x !== id)
+        MetaMountState.includeModules = MetaMountState.includeModules.filter((x) => x !== id)
       }
       _writeMetaCfg()
     })

@@ -258,7 +258,7 @@ enabled=$META_ENABLED
 mount_mode=$META_MOUNT_MODE
 fake_mount_name=$META_FAKE_NAME
 allow_partitions=""
-skip_modules=""
+include_modules=""
 METACFG
 fi
 
