@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "magisk.h"
 
@@ -18,6 +19,64 @@
 
 /* INFO: Longest path */
 static char path_to_magisk[sizeof(DEBUG_RAMDISK_MAGISK)] = { 0 };
+
+/* INFO: Cache for denylist results to avoid fork+exec magisk on every app fork.
+ * Each entry caches whether a process name is on the denylist. The cache has a
+ * TTL to pick up denylist changes made via Magisk app. */
+#define DENYLIST_CACHE_TTL_SEC 30
+#define DENYLIST_CACHE_SIZE 64
+
+struct denylist_cache_entry {
+  char process[PROCESS_NAME_MAX_LEN];
+  bool should_umount;
+  time_t timestamp;
+  bool valid;
+};
+
+static struct denylist_cache_entry denylist_cache[DENYLIST_CACHE_SIZE];
+
+static bool denylist_cache_lookup(const char *process, bool *out) {
+  time_t now = time(NULL);
+  for (size_t i = 0; i < DENYLIST_CACHE_SIZE; i++) {
+    if (!denylist_cache[i].valid) continue;
+    if (now - denylist_cache[i].timestamp > DENYLIST_CACHE_TTL_SEC) {
+      denylist_cache[i].valid = false;
+      continue;
+    }
+    if (strcmp(denylist_cache[i].process, process) == 0) {
+      *out = denylist_cache[i].should_umount;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void denylist_cache_store(const char *process, bool should_umount) {
+  /* INFO: Find an empty slot or the oldest entry to replace */
+  size_t oldest = 0;
+  time_t oldest_time = denylist_cache[0].timestamp;
+  for (size_t i = 0; i < DENYLIST_CACHE_SIZE; i++) {
+    if (!denylist_cache[i].valid) {
+      oldest = i;
+      break;
+    }
+    if (denylist_cache[i].timestamp < oldest_time) {
+      oldest_time = denylist_cache[i].timestamp;
+      oldest = i;
+    }
+  }
+
+  denylist_cache[oldest].valid = true;
+  denylist_cache[oldest].should_umount = should_umount;
+  denylist_cache[oldest].timestamp = time(NULL);
+  strncpy(denylist_cache[oldest].process, process, PROCESS_NAME_MAX_LEN - 1);
+  denylist_cache[oldest].process[PROCESS_NAME_MAX_LEN - 1] = '\0';
+}
+
+/* INFO: Cache for manager uid - the manager package rarely changes, so we
+ * cache the result permanently for the lifetime of zygiskd. */
+static bool manager_uid_cached = false;
+static uid_t cached_manager_uid = (uid_t)-1;
 
 void magisk_get_existence(struct root_impl_state *state) {
   const char *magisk_files[] = {
@@ -73,6 +132,12 @@ bool magisk_uid_granted_root(uid_t uid) {
 }
 
 bool magisk_uid_should_umount(const char *const process) {
+  /* INFO: Check cache first to avoid expensive fork+exec on every app fork */
+  bool cached_result;
+  if (denylist_cache_lookup(process, &cached_result)) {
+    return cached_result;
+  }
+
   /* INFO: PROCESS_NAME_MAX_LEN already has a +1 for NULL.
    * Extra space for SQL-quote escaping (worst case: every char is a quote,
    * which doubles to 2 chars) plus surrounding quotes and query overhead. */
@@ -107,10 +172,19 @@ bool magisk_uid_should_umount(const char *const process) {
     return false;
   }
 
-  return result[0] != '\0';
+  bool should_umount = result[0] != '\0';
+  denylist_cache_store(process, should_umount);
+
+  return should_umount;
 }
 
 bool magisk_uid_is_manager(uid_t uid) {
+  /* INFO: The manager uid rarely changes - cache it permanently to avoid
+   * fork+exec magisk + stat on every app fork. */
+  if (manager_uid_cached) {
+    return uid == cached_manager_uid;
+  }
+
   const char *const argv[] = { "magisk", "--sqlite", "select value from strings where key=\"requester\" limit 1", NULL };
 
   char output[128];
@@ -132,6 +206,10 @@ bool magisk_uid_is_manager(uid_t uid) {
 
     return false;
   }
+
+  /* INFO: Cache the manager uid for the lifetime of zygiskd */
+  cached_manager_uid = st.st_uid;
+  manager_uid_cached = true;
 
   return st.st_uid == uid;
 }

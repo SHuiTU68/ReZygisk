@@ -14,6 +14,7 @@ export const allMainPages = [
   'home',
   'modules',
   'actions',
+  'treatwheel',
   'settings'
 ]
 

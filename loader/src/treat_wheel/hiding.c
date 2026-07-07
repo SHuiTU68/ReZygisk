@@ -187,10 +187,15 @@ int tw_do_maps_hiding(struct api_table *api_table, JNIEnv *tw_env) {
   for (size_t i = 0; i < g_maps->size; i++) {
     struct tw_map *map = &g_maps->maps[i];
 
-    if (map->dev != st.st_dev || !tw_str_starts_with(map->path, "/system/") ||
-        !tw_str_starts_with(map->path, "/vendor/") ||
-        !tw_str_starts_with(map->path, "/product/") ||
-        !tw_str_starts_with(map->path, "/system_ext/")
+    /* INFO: Only hide maps whose path is on system partitions (where zygisk
+     * injected libraries reside). The original code used || with negated
+     * starts_with, which made the condition always true (never hiding).
+     * Correct logic: skip if dev differs OR path is not on any system mount. */
+    if (map->dev != st.st_dev ||
+        (!tw_str_starts_with(map->path, "/system/") &&
+         !tw_str_starts_with(map->path, "/vendor/") &&
+         !tw_str_starts_with(map->path, "/product/") &&
+         !tw_str_starts_with(map->path, "/system_ext/"))
     ) {
       continue;
     }
@@ -199,6 +204,10 @@ int tw_do_maps_hiding(struct api_table *api_table, JNIEnv *tw_env) {
 
     size_t size = (size_t)(map->addr_end - map->addr_start);
     void *copy = mmap(NULL, size, PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (copy == MAP_FAILED) {
+      PLOGE("MH: mmap anonymous buffer");
+      continue;
+    }
     if ((map->perms & PROT_READ) == 0) mprotect((void *)map->addr_start, size, PROT_READ);
 
     memcpy(copy, (void *)map->addr_start, size);

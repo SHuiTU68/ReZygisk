@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <jni.h>
 
 #include "../treat_wheel/utils.h"
@@ -24,14 +25,35 @@ int cfd = -1;
 
 static struct tw_module_state g_tw_state = { 0 };
 static bool g_tw_initialized = false;
+/* INFO: Cached mtime of tw_state to avoid re-reading the file on every app
+ * fork. Only re-parse when the file has actually been modified by WebUI. */
+static time_t g_tw_state_mtime = 0;
+static bool g_tw_state_loaded = false;
 
 static void tw_load_state(void) {
-  FILE *fp = fopen(TW_STATE_PATH, "r");
-  if (!fp) {
-    /* INFO: If state file doesn't exist, default to all-disabled (safe) */
+  struct stat st;
+  if (stat(TW_STATE_PATH, &st) == 0) {
+    /* INFO: Skip re-parsing if the file hasn't changed since last read */
+    if (g_tw_state_loaded && st.st_mtime == g_tw_state_mtime) {
+      return;
+    }
+    g_tw_state_mtime = st.st_mtime;
+  } else {
+    /* INFO: File doesn't exist - reset to safe defaults */
     memset(&g_tw_state, 0, sizeof(g_tw_state));
+    g_tw_state_loaded = true;
     return;
   }
+
+  FILE *fp = fopen(TW_STATE_PATH, "r");
+  if (!fp) {
+    memset(&g_tw_state, 0, sizeof(g_tw_state));
+    g_tw_state_loaded = true;
+    return;
+  }
+
+  /* INFO: Reset state before parsing */
+  memset(&g_tw_state, 0, sizeof(g_tw_state));
 
   char line[256];
   while (fgets(line, sizeof(line), fp)) {
@@ -59,6 +81,7 @@ static void tw_load_state(void) {
   }
 
   fclose(fp);
+  g_tw_state_loaded = true;
 }
 
 void tw_adapter_init(void) {

@@ -1,0 +1,82 @@
+<div class="panel">
+  <div class="header">ReZygisk: {{title}}</div>
+
+  <div class="dimc" style="margin: 0 15px 0 15px; border-radius: 20px;">
+    <div class="dimc liste" style="padding: 45px 22px 25px; border-radius: 20px;">
+      <div id="treatwheel_title" class="dimc" style="font-size: 1.22em;">{{description.title}}</div>
+      <div id="treatwheel_desc" class="dimc" style="font-size: 0.95em; margin-top: 5px; color: var(--text-secondary);">{{description.text}}</div>
+    </div>
+
+    <div class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px;">
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{features.ignoreMode.title}}</div>
+          <div class="dimc desc action_card_description">{{features.ignoreMode.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_ignore_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{features.zygoteMountInfoLeakFixing.title}}</div>
+          <div class="dimc desc action_card_description">{{features.zygoteMountInfoLeakFixing.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_zygote_mountinfo_leak_fixing_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{features.mapsHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{features.mapsHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_maps_hiding_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{features.denylistLogicInversion.title}}</div>
+          <div class="dimc desc action_card_description">{{features.denylistLogicInversion.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_denylist_logic_inversion_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 10px;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{features.moduleLoadingTracesHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{features.moduleLoadingTracesHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_module_loading_traces_hiding_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="small_card dimc" style="margin-bottom: 0;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{features.fridaTracesHiding.title}}</div>
+          <div class="dimc desc action_card_description">{{features.fridaTracesHiding.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="tw_disable_frida_traces_hiding_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="dimc" style="padding: 15px 22px 20px; font-size: 0.85em; color: var(--text-secondary);">
+      {{description.note}}
+    </div>
+  </div>
+</div>

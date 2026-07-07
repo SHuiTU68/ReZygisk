@@ -855,6 +855,11 @@ static char post_section[1024];
     }                                                                                \
   }
 
+/* INFO: Cache the last written status to skip redundant file writes. Multiple
+ * daemon info / zygote injection events can fire in rapid succession during
+ * boot, each previously triggering a full rewrite of module.prop + state.json. */
+static char last_status_text[256] = { 0 };
+
 static bool update_status(const char *message) {
   FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
   if (prop == NULL) {
@@ -892,6 +897,16 @@ static bool update_status(const char *message) {
 
   WRITE_STATUS_ABI(64)
   WRITE_STATUS_ABI(32)
+
+  /* INFO: Skip rewriting files if the status text hasn't changed. This avoids
+   * redundant I/O during boot when multiple events produce the same status. */
+  if (strcmp(status_text, last_status_text) == 0) {
+    fclose(prop);
+
+    return true;
+  }
+
+  strncpy(last_status_text, status_text, sizeof(last_status_text) - 1);
 
   fprintf(prop, "%s[%s] %s", pre_section, status_text, post_section);
   fclose(prop);

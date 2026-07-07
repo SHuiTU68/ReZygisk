@@ -32,6 +32,10 @@ int rezygiskd_connect(uint8_t retry) {
   strcpy(addr.sun_path, sock_path);
   socklen_t socklen = sizeof(addr);
 
+  /* INFO: Exponential backoff starting at 100ms, capped at 1s. This avoids
+   * the previous fixed 1s sleep that could block zygote for up to 5s during
+   * early boot when zygiskd has not yet started. */
+  useconds_t backoff_us = 100 * 1000;
   retry++;
   while (--retry) {
     int fd = socket(PF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -49,7 +53,9 @@ int rezygiskd_connect(uint8_t retry) {
     if (retry) {
       PLOGE("Failed to connect to ReZygiskd, retrying...");
 
-      sleep(1);
+      usleep(backoff_us);
+      backoff_us *= 2;
+      if (backoff_us > 1000 * 1000) backoff_us = 1000 * 1000;
     }
   }
 

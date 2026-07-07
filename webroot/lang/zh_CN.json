@@ -37,10 +37,16 @@
           "stop": "停止",
           "pause": "暂停"
         }
-      },
-      "treatwheel": {
+      }
+    },
+    "treatwheel": {
+      "title": "隐藏",
+      "description": {
         "title": "Treat Wheel",
-        "description": "集成在 ReZygisk 中的高级隐藏控制。",
+        "text": "集成在 ReZygisk 中的高级隐藏控制。",
+        "note": "更改将在下次启动应用时生效。"
+      },
+      "features": {
         "ignoreMode": {
           "title": "忽略模式",
           "description": "完全禁用所有 Treat Wheel 功能。"

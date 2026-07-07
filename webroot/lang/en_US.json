@@ -37,10 +37,16 @@
           "stop": "Stop",
           "pause": "Pause"
         }
-      },
-      "treatwheel": {
+      }
+    },
+    "treatwheel": {
+      "title": "Hiding",
+      "description": {
         "title": "Treat Wheel",
-        "description": "Advanced hiding controls integrated into ReZygisk.",
+        "text": "Advanced hiding controls integrated into ReZygisk.",
+        "note": "Changes take effect on the next app launch."
+      },
+      "features": {
         "ignoreMode": {
           "title": "Ignore Mode",
           "description": "Completely disable all Treat Wheel features."
