@@ -108,6 +108,7 @@ void tw_adapter_init(void) {
 
 void tw_adapter_pre_specialize(JNIEnv *env, const char *process_name, uint32_t flags) {
   (void) env;
+  (void) process_name;
 
   if (!g_tw_initialized) {
     tw_adapter_init();
@@ -115,25 +116,24 @@ void tw_adapter_pre_specialize(JNIEnv *env, const char *process_name, uint32_t f
 
   if (g_tw_state.is_ignoring) return;
 
-  /* INFO: Reload state on every specialize to pick up WebUI changes */
+  /* INFO: Reload state only if the file has been modified (mtime check) */
   tw_load_state();
   if (g_tw_state.is_ignoring) return;
 
   bool on_denylist = (flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST;
-  bool should_hide = false;
 
-  if (!g_tw_state.disable_denylist_logic_inversion) {
-    /* INFO: Inverted logic: denylist processes get Mounted, others get Clean */
-    tw_do_denylist_logic_inversion(NULL, env, flags);
-    /* INFO: After inversion, if process was on denylist, it now has Mounted ns,
-     *       so we should still hide traces for it. */
-    should_hide = on_denylist;
-  } else {
-    should_hide = on_denylist;
-  }
+  /* INFO: ReZygisk already handles mount namespace switching correctly at
+   * hook.c (Clean for denylist, Mounted for others). We must NOT call
+   * tw_do_denylist_logic_inversion here because it would REVERT the mount
+   * namespace (switching denylist apps back to Mounted), causing mount
+   * points to be re-mounted after ReZygisk just unmounted them.
+   *
+   * The "denylist logic inversion" toggle in WebUI now only controls
+   * whether hiding features are applied to denylist apps. It no longer
+   * inverts the mount namespace. */
 
-  if (should_hide) {
-    LOGI("Treat Wheel: process is on denylist (or inverted), running hiding.");
+  if (on_denylist) {
+    LOGI("Treat Wheel: process is on denylist, running hiding.");
 
     /* INFO: Skip GSI hiding as requested by user */
     (void)g_tw_state.disable_gsi_hiding;
@@ -154,15 +154,9 @@ void tw_adapter_atexit_cleanup(JNIEnv *env, uint32_t flags) {
   if (g_tw_state.is_ignoring) return;
 
   bool on_denylist = (flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST;
-  bool should_hide = false;
 
-  if (g_tw_state.disable_denylist_logic_inversion) {
-    should_hide = on_denylist;
-  } else {
-    should_hide = !on_denylist;
-  }
-
-  if (should_hide && !g_tw_state.disable_module_loading_traces_hiding) {
+  /* INFO: Apply atexit hiding for denylist processes */
+  if (on_denylist && !g_tw_state.disable_module_loading_traces_hiding) {
     tw_do_atexit_hiding(NULL, env);
   }
 

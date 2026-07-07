@@ -861,14 +861,14 @@ static char post_section[1024];
 static char last_status_text[256] = { 0 };
 
 static bool update_status(const char *message) {
-  FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
-  if (prop == NULL) {
-    PLOGE("failed to open prop");
-
-    return false;
-  }
-
   if (message) {
+    FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
+    if (prop == NULL) {
+      PLOGE("failed to open prop");
+
+      return false;
+    }
+
     fprintf(prop, "%s[%s] %s", pre_section, message, post_section);
     fclose(prop);
 
@@ -899,14 +899,21 @@ static bool update_status(const char *message) {
   WRITE_STATUS_ABI(32)
 
   /* INFO: Skip rewriting files if the status text hasn't changed. This avoids
-   * redundant I/O during boot when multiple events produce the same status. */
+   * redundant I/O during boot when multiple events produce the same status.
+   * IMPORTANT: This check must happen BEFORE fopen("w"), which truncates the
+   * file. Skipping after fopen would leave module.prop empty. */
   if (strcmp(status_text, last_status_text) == 0) {
-    fclose(prop);
-
     return true;
   }
 
   strncpy(last_status_text, status_text, sizeof(last_status_text) - 1);
+
+  FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
+  if (prop == NULL) {
+    PLOGE("failed to open prop");
+
+    return false;
+  }
 
   fprintf(prop, "%s[%s] %s", pre_section, status_text, post_section);
   fclose(prop);
