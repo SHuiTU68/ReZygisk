@@ -101,10 +101,10 @@ _detect_root_impl() {
   fi
 
   # INFO: APatch detection. APATCH env var is set by APatch's post-fs-data
-  # runner. Some older APatch builds only have the /data/adb/ap directory.
-  if [ "$APATCH" = "true" ] || [ -d /data/adb/ap ]; then
+  # runner. APatch uses /data/adb/ap (main) and /data/adb/apd (daemon).
+  if [ "$APATCH" = "true" ] || [ -d /data/adb/ap ] || [ -d /data/adb/apd ]; then
     SOURCE=APatch
-    for d in /data/adb/ap/bin /data/adb/ap/bin/ap; do
+    for d in /data/adb/ap/bin /data/adb/apd/bin; do
       [ -d "$d" ] && ROOT_BIN_DIR="$d" && break
     done
     _meta_log "root impl: APatch (ROOT_BIN_DIR=${ROOT_BIN_DIR:-none})"
@@ -112,8 +112,8 @@ _detect_root_impl() {
   fi
 
   # INFO: KSU detection — covers official KernelSU, KernelSU-Next, SukiSU,
-  # Magic KSU, and all other API-compatible forks. They all set KSU=true and
-  # use /data/adb/ksu. Some forks may use /data/adb/ksud or other variants.
+  # Magic KSU, Kowsu, and all other API-compatible forks. They all set
+  # KSU=true and use /data/adb/ksu. Some forks may use /data/adb/ksud.
   if [ "$KSU" = "true" ] || [ -d /data/adb/ksu ]; then
     SOURCE=KSU
     for d in /data/adb/ksu/bin /data/adb/ksud/bin /data/adb/magisk/bin; do
@@ -125,10 +125,10 @@ _detect_root_impl() {
 
   # INFO: Fallback — scan /data/adb/ for known root impl directories. This
   # catches forks that don't set the env var and use non-standard dir names.
-  for d in /data/adb/ksu /data/adb/ksud /data/adb/ap /data/adb/apatch; do
+  for d in /data/adb/ksu /data/adb/ksud /data/adb/ap /data/adb/apd; do
     if [ -d "$d" ]; then
       case "$d" in
-        */ap|*/apatch)
+        */ap|*/apd)
           SOURCE=APatch
           ROOT_BIN_DIR="$d/bin"
           ;;
