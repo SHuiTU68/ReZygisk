@@ -307,9 +307,11 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
   fi
 
   # INFO: Persist the configuration so metamount.sh can source it on next boot.
+  # Config lives at /data/adb/.rz_meta_cfg (OUTSIDE /data/adb/rezygisk/) so it
+  # survives post-fs-data.sh's rm -rf /data/adb/rezygisk and the chmod 555.
   # include_modules and allow_partitions are auto-populated above.
-  mkdir -p /data/adb/rezygisk
-  cat > /data/adb/rezygisk/.rz_meta_cfg <<METACFG
+  mkdir -p /data/adb
+  cat > /data/adb/.rz_meta_cfg <<METACFG
 enabled=$META_ENABLED
 mount_mode=$META_MOUNT_MODE
 fake_mount_name=$META_FAKE_NAME

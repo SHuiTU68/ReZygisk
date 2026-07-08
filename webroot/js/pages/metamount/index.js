@@ -1,6 +1,6 @@
 import { exec } from '../../kernelsu.js'
 
-const MA_CFG_PATH = '/data/adb/rezygisk/.rz_meta_cfg'
+const MA_CFG_PATH = '/data/adb/.rz_meta_cfg'
 const MA_MODULES_DIR = '/data/adb/modules'
 
 // INFO: MetaMount state. `isMetamodule` is true only when Hrezygisk is the
@@ -38,7 +38,7 @@ async function _loadMetamoduleStatus() {
 // mounted partitions.
 async function _loadMetaStatus() {
   MetaMountState.effectiveMode = ''
-  const r = await exec('cat /data/adb/rezygisk/.rz_meta_status 2>/dev/null')
+  const r = await exec('cat /data/adb/.rz_meta_status 2>/dev/null')
   if (r.errno !== 0) return
   r.stdout.split('\n').forEach((line) => {
     const em = line.match(/^effective_mode=(.+)$/)
@@ -181,7 +181,7 @@ function _writeMetaCfg() {
   const safeAllow = allowList.replace(/[^A-Za-z0-9_ .\-]/g, '')
   // Build file content with \n that printf '%b' will expand.
   const content = `enabled=${enabled}\\nmount_mode=${mode}\\nfake_mount_name=${name}\\nallow_partitions="${safeAllow}"\\ninclude_modules="${safeInclude}"\\n`
-  return exec(`mkdir -p /data/adb/rezygisk && printf '%b' '${content}' > ${MA_CFG_PATH}`)
+  return exec(`mkdir -p /data/adb && printf '%b' '${content}' > ${MA_CFG_PATH}`)
 }
 
 // INFO: Sync all UI controls from MetaMountState.

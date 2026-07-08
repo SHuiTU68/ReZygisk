@@ -22,12 +22,32 @@ if [ "$(which magisk)" ]; then
   done
 fi
 
+# INFO: As the active metamodule (metamodule=1 in module.prop), Hrezygisk is
+# responsible for mounting other modules' system/ dirs via overlay.
+#
+# metamount.sh stores its config/status/staging OUTSIDE /data/adb/rezygisk/
+# (at /data/adb/.rz_meta_*), so the rm -rf below does NOT affect it. We still
+# call metamount.sh BEFORE the rm -rf for ordering clarity — the overlay mounts
+# it creates must be in place before zygisk-ptrace starts.
+#
+# Run metamount.sh only on KernelSU/APatch (where metamodule=1 is honored).
+# On Magisk this post-fs-data.sh is never invoked as a metamodule hook.
+#
+# We do NOT use `set -e` semantics here — metamount.sh failures must not abort
+# the rest of post-fs-data.sh (zygote still needs to start).
+if [ -f "$MODDIR/metamount.sh" ]; then
+  sh "$MODDIR/metamount.sh" || log -p w -t "zygisk-sh" "metamount.sh returned non-zero, continuing"
+fi
+
 create_sys_perm() {
   mkdir -p $1
   chmod 555 $1
   chcon u:object_r:system_file:s0 $1
 }
 
+# INFO: /data/adb/rezygisk is Hrezygisk's own temp dir for zygisk-ptrace.
+# metamount.sh does NOT use this dir (its data lives at /data/adb/.rz_meta_*),
+# so this rm -rf is safe and won't affect metamodule config or staging.
 export TMP_PATH=/data/adb/rezygisk
 rm -rf "$TMP_PATH"
 

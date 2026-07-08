@@ -30,7 +30,7 @@
 #
 # Three mount backends (inspired by mountify):
 #   tmpfs — stage on /mnt/vendor/<name> tmpfs, hardest to detect
-#   ext4  — loop-mounted ext4 image at /data/adb/rezygisk/.rw/<name>.img
+#   ext4  — loop-mounted ext4 image at /data/adb/.rz_meta_rw/<name>.img
 #   direct — upperdir on /data, simplest, always available
 #
 # Mode auto (default) probes tmpfs → ext4 → direct, picks first that works.
@@ -40,13 +40,21 @@
 
 MODDIR=${0%/*}
 
-LOGFILE=/data/adb/rezygisk/.rz_meta.log
-CFG=/data/adb/rezygisk/.rz_meta_cfg
+# INFO: Log lives OUTSIDE /data/adb/rezygisk/ so it survives the rm -rf cleanup
+# that post-fs-data.sh performs on /data/adb/rezygisk. This lets the user (and
+# WebUI) read the log AFTER boot to diagnose why mounts did/didn't happen.
+LOGFILE=/data/adb/.rz_meta.log
+# INFO: CFG, STATUS, and RW_BASE live OUTSIDE /data/adb/rezygisk/ on purpose.
+# post-fs-data.sh does `rm -rf /data/adb/rezygisk` every boot and then sets the
+# dir to chmod 555 (no write). If our config/staging lived there, it would be
+# wiped on every boot AND unwritable (555) on the 2nd+ boot — breaking ext4
+# image creation and status writes. /data/adb/ itself is 755 and never wiped.
+CFG=/data/adb/.rz_meta_cfg
 # INFO: Runtime status file. Written AFTER probe so the WebUI/home page can
 # show the ACTUAL effective mode (e.g. "auto" resolved to "ext4"). This is
 # distinct from CFG (user intent) — STATUS reflects what really happened.
-STATUS=/data/adb/rezygisk/.rz_meta_status
-RW_BASE=/data/adb/rezygisk/.rw
+STATUS=/data/adb/.rz_meta_status
+RW_BASE=/data/adb/.rz_meta_rw
 EXT4_IMG_SIZE_MB=256
 
 _meta_log() {
@@ -58,6 +66,23 @@ if [ -x /data/adb/ksu/bin/busybox ]; then
 elif [ -x /data/adb/ap/bin/busybox ]; then
   SOURCE=APatch
 else
+  exit 0
+fi
+
+# INFO: Guard against double-execution in a single boot. KernelSU-Next calls
+# metamount.sh directly as a metamodule hook (with priority, before regular
+# module scripts); Hrezygisk's own post-fs-data.sh ALSO calls it. Running twice
+# is harmful: the second run would try to recreate the ext4 image that the
+# first run's overlay is backed by, breaking the mount. We use the kernel
+# boot_id as a per-boot sentinel stored OUTSIDE /data/adb/rezygisk/ (so it
+# survives post-fs-data.sh's rm -rf). The sentinel is written at the END of a
+# successful run, so early exits (disabled / no partitions) still allow a later
+# call to proceed — only an actual completed mount blocks re-entry.
+RZ_BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+RZ_SENTINEL=/data/adb/.rz_meta_boot_sentinel
+if [ -n "$RZ_BOOT_ID" ] && [ -f "$RZ_SENTINEL" ] \
+   && [ "$(cat "$RZ_SENTINEL" 2>/dev/null)" = "$RZ_BOOT_ID" ]; then
+  _meta_log "metamount already completed this boot (boot_id=$RZ_BOOT_ID), skipping"
   exit 0
 fi
 
@@ -249,7 +274,7 @@ _try_setup_ext4() {
 
   # SAFETY: validate paths are absolute and non-empty
   [ -n "$img" ] && [ -n "$mnt" ] || return 1
-  case "$img" in /data/adb/rezygisk/.rw/*) ;; *) return 1;; esac
+  case "$img" in /data/adb/.rz_meta_rw/*) ;; *) return 1;; esac
   case "$mnt" in /mnt/vendor/*) ;; *) return 1;; esac
 
   mke2fs_bin=""
@@ -474,4 +499,11 @@ mounted_partitions=$(echo $MOUNTED_PARTITIONS)
 RASTAT2
 
 _meta_log "metamount done (effective_mode=$MOUNT_MODE mounted=[$MOUNTED_PARTITIONS])"
+
+# INFO: Write the boot_id sentinel LAST, so only a fully-completed run (mounts
+# attempted on all partitions) marks this boot as done. Early exits (disabled /
+# no partitions / no SOURCE) do NOT write it, allowing a later invocation in the
+# same boot to proceed if conditions changed.
+[ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
+
 exit 0

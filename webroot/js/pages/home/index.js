@@ -75,8 +75,8 @@ async function _getMetaMountInfo() {
   if (_metaMountCache) return _metaMountCache
   const [linkR, cfgR, statusR] = await Promise.all([
     exec('readlink /data/adb/metamodule 2>/dev/null'),
-    exec('cat /data/adb/rezygisk/.rz_meta_cfg 2>/dev/null'),
-    exec('cat /data/adb/rezygisk/.rz_meta_status 2>/dev/null')
+    exec('cat /data/adb/.rz_meta_cfg 2>/dev/null'),
+    exec('cat /data/adb/.rz_meta_status 2>/dev/null')
   ])
   const active = (linkR.errno === 0 && /rezygisk$/.test(linkR.stdout.trim()))
   let enabled = false

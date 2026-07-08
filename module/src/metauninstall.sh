@@ -8,7 +8,7 @@
 # metamount.sh rebuilds its overlay upperdirs from scratch on every boot by
 # scanning /data/adb/modules/*, so a removed module's files naturally stop
 # being merged on the next boot. There is no per-module persistent state in
-# /data/adb/rezygisk/.rw to clean up here.
+# /data/adb/.rz_meta_rw to clean up here.
 #
 # This hook exists mainly as a no-op placeholder so the metamodule contract is
 # complete and future cleanup logic has a home. We intentionally do NOT wipe
