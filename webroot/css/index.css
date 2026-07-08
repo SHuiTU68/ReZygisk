@@ -61,7 +61,8 @@
 
   /* Locked Color */
   --lock: #fff;
-  --font-family: 'Roboto', 'sans-serif';
+  /* HarmonyOS Sans (Huawei Porsche Design font) as primary, with fallback */
+  --font-family: 'HarmonyOS Sans SC', 'HarmonyOS Sans', 'Roboto', system-ui, -apple-system, sans-serif;
 }
 
 * {
@@ -119,21 +120,22 @@ a {
 }
 
 /* ============================================================
- * MiuiX Card — grouped rounded container with tonal surface.
- * Used as outer wrapper for lists of items.
+ * MiuiX Card — precise values from miuix Card.kt.
+ * Corner radius 16dp (squircle extension 1.1, approximated with
+ * plain border-radius). Background = surfaceContainer. No elevation.
  * ============================================================ */
 .card {
   margin: 0 15px 10px 15px;
   padding: 15px 15px;
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   color: var(--lock);
   background-color: var(--surface);
 }
 
 /* MiuiX group — wraps multiple list items, seamless, overflow hidden.
- * This is the signature HyperOS "card group" pattern. */
+ * Uses Card's 16px radius. HyperOS "card group" pattern. */
 .miuix-group {
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -143,7 +145,7 @@ a {
 
 /* MiuiX group section title — primary-colored small label */
 .miuix-group-title {
-  margin: 18px 20px 6px 20px;
+  margin: 18px 16px 6px 16px;
   font-size: 0.78em;
   color: var(--primary);
   user-select: none;
@@ -151,30 +153,32 @@ a {
   letter-spacing: 0.3px;
 }
 
-/* MiuiX list item — tonal surface, press radius animation (sink effect).
- * Static: radius-xs (4px). Pressed: radius-xl (24px). HyperOS signature. */
+/* MiuiX list item — precise values from miuix BasicComponent.
+ * Min height 56dp, padding 16dp. Press feedback: overlay alpha 0.10
+ * (MiuixIndication, onBackground color, spring 200ms in / 350ms out).
+ * Divider: 0.75px, color = dividerLine (outline-variant).
+ * Title: headline1 17sp Medium. Summary: body2 14sp, 60% alpha. */
 .miuix-item {
   display: flex;
   align-items: center;
-  gap: 16px;
-  min-height: 60px;
-  padding: 14px 20px;
+  gap: 8px;
+  min-height: 56px;
+  padding: 16px;
   box-sizing: border-box;
   background-color: var(--surface);
   color: var(--on-surface);
   position: relative;
-  border-radius: var(--radius-xs);
-  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1),
-              background-color 0.2s ease;
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Press overlay — miuix uses a black/white 10% alpha overlay.
+ * We approximate with a tonal background shift. */
 .miuix-item:active {
-  border-radius: var(--radius-xl);
   background-color: var(--surface-container-high);
 }
 
 .miuix-item + .miuix-item {
-  border-top: 1px solid var(--outline-variant);
+  border-top: 0.75px solid var(--outline-variant);
 }
 
 /* small_card — compact card with press feedback (legacy, kept for compat) */
@@ -216,15 +220,18 @@ a {
 }
 
 /* ============================================================
- * MiuiX Switch — HyperOS style.
- * Track: pill, outline border when off, primary fill when on.
- * Thumb: small (off) → grows (on), outline color → on-primary.
+ * MiuiX Switch — precise values from miuix-kotlin-multiplatform.
+ * Track: 49×28dp pill (CircleShape). Thumb: 20dp circle.
+ * Off position: left 4dp. On position: left 25dp (travel 21dp).
+ * Press feedback: thumb scales 1.127 (spring, damping 0.6).
+ * Colors: on = primary track + onPrimary thumb; off = secondary track
+ * + onSecondary thumb (both white thumb — MIUI "gray track white ball").
  * ============================================================ */
 .switch {
   position: relative;
   display: inline-block;
-  width: 52px;
-  height: 32px;
+  width: 49px;
+  height: 28px;
   margin-left: 10px;
   flex-shrink: 0;
 }
@@ -239,35 +246,42 @@ a {
   position: absolute;
   inset: 0;
   cursor: pointer;
-  background-color: var(--surface-container-highest);
-  transition: background-color 0.25s ease, border-color 0.25s ease;
+  background-color: var(--surface-variant);
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   border-radius: var(--radius-full);
-  border: 2px solid var(--outline);
 }
 
 .slider:before {
   position: absolute;
   content: "";
-  height: 16px;
-  width: 16px;
-  left: 6px;
+  height: 20px;
+  width: 20px;
+  left: 4px;
   top: 50%;
   transform: translateY(-50%);
-  background-color: var(--outline);
-  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
+  background-color: var(--on-primary);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 input:checked + .slider {
   background-color: var(--primary);
-  border-color: var(--primary);
 }
 
 input:checked + .slider:before {
-  transform: translate(20px, -50%);
+  transform: translate(21px, -50%);
   background-color: var(--on-primary);
-  height: 24px;
-  width: 24px;
+}
+
+/* Press feedback: thumb scales 1.127 (miuix press spring) */
+.switch:active .slider:before {
+  transform: translateY(-50%) scale(1.127);
+}
+
+.switch:active input:checked + .slider:before {
+  transform: translate(21px, -50%) scale(1.127);
 }
 
 /* ============================================================

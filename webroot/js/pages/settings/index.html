@@ -88,6 +88,39 @@
     </select>
   </div>
 
+  <!-- INFO: iOS Liquid Glass effect toggle -->
+  <div class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{liquidGlass.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{liquidGlass.description}}
+      </div>
+    </div>
+
+    <label class="switch dimc">
+      <input id="rz_liquid_glass_switch" type="checkbox">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <!-- INFO: Blur intensity slider (only effective when liquid glass is on) -->
+  <div id="rz_blur_card" class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{blurIntensity.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{blurIntensity.description}}
+      </div>
+    </div>
+    <div class="dimc" style="display: flex; align-items: center; gap: 10px; margin-top: 8px; width: 100%;">
+      <input id="rz_blur_intensity_range" type="range" min="0" max="40" step="2" value="12" class="dimc" style="flex: 1;">
+      <span id="rz_blur_intensity_value" class="dimc desc" style="font-size: 0.9em; min-width: 38px; text-align: right;">12px</span>
+    </div>
+  </div>
+
   <!-- INFO: Credit card -->
   <div class="dim card" style="margin-top: 15px;">
     <div class="dimc content">

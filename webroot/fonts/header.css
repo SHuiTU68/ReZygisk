@@ -1,1 +1,9 @@
+/* INFO: HarmonyOS Sans — Huawei's open-source font family, visually aligned
+ * with the Porsche Design edition used on Huawei Mate RS. Loaded via jsDelivr
+ * CDN (harmonyos-sans-webfont-splitted package, SC = Simplified Chinese).
+ * License: HarmonyOS Sans Fonts License Agreement (free to embed/bundle).
+ * Fallback chain: HarmonyOS Sans → system fonts for offline reliability. */
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+@import url('https://cdn.jsdelivr.net/npm/harmonyos-sans-webfont-splitted@1.2.1/dist/HarmonyOS_Sans_SC/Regular/Regular.css');
+@import url('https://cdn.jsdelivr.net/npm/harmonyos-sans-webfont-splitted@1.2.1/dist/HarmonyOS_Sans_SC/Medium/Medium.css');
+@import url('https://cdn.jsdelivr.net/npm/harmonyos-sans-webfont-splitted@1.2.1/dist/HarmonyOS_Sans_SC/Bold/Bold.css');

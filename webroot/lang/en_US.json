@@ -177,6 +177,14 @@
         "medium": "Medium (500)",
         "bold": "Bold (700)"
       },
+      "liquidGlass": {
+        "title": "iOS Liquid Glass",
+        "description": "Enable translucent frosted glass effect on cards, navbar, and headers. Uses backdrop-filter, requires device support."
+      },
+      "blurIntensity": {
+        "title": "Blur Intensity",
+        "description": "Adjust the background blur radius for the liquid glass effect. Higher = more blurry. Only effective when liquid glass is on."
+      },
       "moduleDevelopers": "Module Developer(s)",
       "WebUIDevelopers": "WebUI Developer(s)",
       "orginalDevelopers": "Original Module Developer(s)",

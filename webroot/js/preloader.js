@@ -34,7 +34,7 @@ if (ConfigState.enableSystemFont) {
   headTag.appendChild(styleTag)
   styleTag.innerHTML = `
     :root {
-      --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif
+      --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'HarmonyOS Sans SC', 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif
     }`
 }
 
@@ -51,6 +51,41 @@ if (ConfigState.enableSystemFont) {
     html { font-size: ${_fs}px; }
     body { font-weight: ${_fw}; }
   `
+}
+
+/* INFO: Apply iOS Liquid Glass + blur intensity at boot. The liquid glass
+ * effect uses backdrop-filter on cards/navbar; blur intensity controls the
+ * blur radius via the --glass-blur CSS variable. */
+if (ConfigState.liquidGlass === true) {
+  const headTag = document.getElementsByTagName('head')[0]
+  const styleTag = document.createElement('style')
+  styleTag.id = 'liquid-glass-tag'
+  headTag.appendChild(styleTag)
+  styleTag.innerHTML = `
+    body.rz-liquid-glass {
+      --glass-blur: ${ConfigState.blurIntensity || 12}px;
+    }
+    body.rz-liquid-glass .card,
+    body.rz-liquid-glass .small_card,
+    body.rz-liquid-glass .miuix-group,
+    body.rz-liquid-glass #navbar {
+      background-color: color-mix(in srgb, var(--surface) 65%, transparent) !important;
+      backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.5);
+      -webkit-backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.5);
+      border: 1px solid color-mix(in srgb, var(--on-surface) 8%, transparent);
+      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08), inset 0 1px 0 color-mix(in srgb, var(--on-surface) 6%, transparent);
+    }
+    body.rz-liquid-glass .header {
+      background-color: color-mix(in srgb, var(--background) 70%, transparent) !important;
+      backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.3);
+      -webkit-backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.3);
+    }
+    body.rz-liquid-glass .ma-item {
+      background-color: color-mix(in srgb, var(--surface) 50%, transparent) !important;
+    }
+  `
+  document.body.classList.add('rz-liquid-glass')
+  document.body.style.setProperty('--glass-blur', `${ConfigState.blurIntensity || 12}px`)
 }
 
 /* INFO: This code are meant to load the link with any card have credit-link attribute inside it */

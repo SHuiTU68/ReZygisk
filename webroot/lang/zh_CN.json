@@ -177,6 +177,14 @@
         "medium": "中等 (500)",
         "bold": "粗体 (700)"
       },
+      "liquidGlass": {
+        "title": "iOS 液态玻璃",
+        "description": "为卡片、导航栏和标题栏启用半透明毛玻璃效果。基于 backdrop-filter 实现，需要设备支持。"
+      },
+      "blurIntensity": {
+        "title": "模糊强度",
+        "description": "调整液态玻璃效果的背景模糊半径。值越大越模糊。仅在液态玻璃开启时生效。"
+      },
       "moduleDevelopers": "模块开发者",
       "WebUIDevelopers": "WebUI 开发者",
       "orginalDevelopers": "原始模块开发者",
