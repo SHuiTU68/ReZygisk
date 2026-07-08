@@ -8,27 +8,23 @@ on:
   merge_group:
   workflow_dispatch:
     inputs:
-      rebuild_lkm:
-        description: "Rebuild nuke.ko from source (slow, ~30min). Default uses cached/prebuilt ko."
+      skip_lkm:
+        description: "Skip nuke.ko source build (use prebuilt ko). Use when you only changed module/webui code."
         required: false
         default: false
         type: boolean
 
 jobs:
   # INFO: Build nuke.ko from source against AOSP android15-6.6-lts GKI kernel.
-  # This job is OPTIONAL — it only runs when:
-  #   1. nuke_ext4_lkm source changes (path filter), OR
-  #   2. manually triggered with rebuild_lkm=true
-  # Otherwise the prebuilt module/src/lkm/nuke.ko is used directly.
+  # Runs on EVERY CI run by default (push, PR, manual) so the module zip always
+  # contains a freshly-built ko. Pass skip_lkm=true on manual dispatch to skip
+  # when you only touched module/webui code and want a fast run.
   # Optimization: only build the kernel_aarch64_modules target (not the full
   # kernel image), which skips vmlinux/boot.img and cuts build time ~40%.
   build-lkm:
     name: Build nuke.ko
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' && inputs.rebuild_lkm == true ||
-      github.event_name == 'push' &&
-        contains(toJSON(github.event.commits.*.modified), 'nuke_ext4_lkm/')
+    if: ${{ !((github.event_name == 'workflow_dispatch') && (inputs.skip_lkm == true)) }}
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -127,14 +123,13 @@ jobs:
           retention-days: 30
 
   # INFO: Build the Hrezygisk module zip. Depends on build-lkm so the freshly
-  # built ko gets baked into the zip. If build-lkm was skipped (no source
-  # change + no manual trigger), the prebuilt module/src/lkm/nuke.ko is used.
+  # built ko gets baked into the zip. If build-lkm was skipped (manual
+  # skip_lkm=true), the prebuilt module/src/lkm/nuke.ko is used instead.
   build:
     name: Build (${{ matrix.build_type }})
     needs: build-lkm
-    # INFO: Always run the module build, even if build-lkm was skipped
-    # (build-lkm is conditional). use if: always() + success() to inherit
-    # the result of build-lkm when it ran.
+    # INFO: Run module build when build-lkm succeeded OR was skipped.
+    # If build-lkm failed, skip the module build (no fresh ko to embed).
     if: ${{ always() && (needs.build-lkm.result == 'success' || needs.build-lkm.result == 'skipped') }}
     runs-on: ubuntu-latest
     strategy:
