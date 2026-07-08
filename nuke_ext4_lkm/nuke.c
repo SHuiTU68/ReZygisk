@@ -14,6 +14,9 @@
 #include <linux/version.h>
 #include <linux/kallsyms.h>
 #include <linux/kprobes.h>
+/* INFO: For kernel >= 5.4, MODULE_IMPORT_NS lives in <linux/export.h>.
+ * For older kernels it's in <linux/module.h>. Including both is safe. */
+#include <linux/export.h>
 
 #ifndef MODULE
 #error "This is for LKM builds only. Do not compile built-in (CONFIG_NUKE_EXT4_SYSFS=y)."
@@ -178,6 +181,9 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Hrezygisk");
 MODULE_DESCRIPTION("nuke ext4 sysfs (auto-resolve via kallsyms)");
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-#endif
+/* INFO: mountify's original used MODULE_IMPORT_NS(VFS_internal_...) to
+ * access VFS-internal symbols. We don't actually need it:
+ *   - kern_path() is a normal EXPORT_SYMBOL, no namespace required.
+ *   - kallsyms_lookup_name() is resolved via kprobe trick (not via import).
+ * Removing this avoids build breakage on kernels where the namespace name
+ * changed (6.x) or where MODULE_IMPORT_NS requires extra headers. */

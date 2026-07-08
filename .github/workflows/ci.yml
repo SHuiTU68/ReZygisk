@@ -115,36 +115,47 @@ jobs:
           mv ../../nuke_ext4_lkm drivers/nuke_ext4_lkm
 
           # Wire it into Kconfig / Makefile.
+          # IMPORTANT: use obj-m (module), NOT obj-y (built-in). We need a
+          # loadable .ko, not a built-in driver.
           sed -i 's/endmenu//g' drivers/Kconfig
           echo 'source "drivers/nuke_ext4_lkm/Kconfig"' >> drivers/Kconfig
           echo 'endmenu' >> drivers/Kconfig
-          echo 'obj-y += nuke_ext4_lkm/' >> drivers/Makefile
+          echo 'obj-m += nuke_ext4_lkm/' >> drivers/Makefile
 
-          # Patch modules.bzl so bazel builds + ships nuke.ko, and relax the
-          # "needs unknown symbol" check caused by MODULE_IMPORT_NS.
+          # Patch modules.bzl so bazel builds + ships nuke.ko.
+          # The module list variable name varies across kernel versions; try
+          # several known patterns. Also relax the "needs unknown symbol"
+          # check caused by MODULE_IMPORT_NS.
           cd ..
           sed -i 's/needs unknown symbol/Dont abort when unknown symbol/g' build/kernel/*.sh 2>/dev/null || true
           if [ -e common/modules.bzl ]; then
-            sed -i 's/_COMMON_GKI_MODULES_LIST = \[/_COMMON_GKI_MODULES_LIST = \[ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl
+            echo "=== modules.bzl before patch ==="
+            grep -n "MODULES_LIST\|module_outs\|GKI_MODULES" common/modules.bzl | head -10
+            # Try several variable name patterns
+            sed -i 's/_COMMON_GKI_MODULES_LIST = \[/_COMMON_GKI_MODULES_LIST = \[ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl 2>/dev/null || true
+            sed -i 's/_GKI_MODULES_LIST = \[/_GKI_MODULES_LIST = \[ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl 2>/dev/null || true
+            sed -i 's/module_outs = \[/module_outs = [ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl 2>/dev/null || true
+            echo "=== modules.bzl after patch ==="
+            grep -n "nuke" common/modules.bzl | head -5
           fi
 
-      # INFO: Optimization — build ONLY the modules target, not the full
-      # kernel image. This skips vmlinux, boot.img, and cuts ~40% of build
-      # time. Falls back to _dist if _modules target doesn't exist.
+      # INFO: Build via Kleaf. Use the standard kernel_aarch64_dist target
+      # (builds kernel + modules). The _modules-only target may not exist on
+      # all branches, so we go straight to _dist for reliability.
       - name: Build nuke.ko via Kleaf
         working-directory: android-kernel
         run: |
           mkdir -p dist
-          # Try the modules-only target first (much faster — no vmlinux).
-          if tools/bazel build --config=fast --lto=thin //common:kernel_aarch64_modules 2>&1; then
-            echo "modules target built, locating nuke.ko..."
-            find bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \;
-          else
-            echo "modules target failed, falling back to full dist..."
-            tools/bazel run --config=fast --config=stamp --lto=thin \
-              //common:kernel_aarch64_dist -- --dist_dir=dist
+          echo "=== Building kernel_aarch64_dist (this takes ~20min) ==="
+          tools/bazel run --config=fast --config=stamp --lto=thin \
+            //common:kernel_aarch64_dist -- --dist_dir=dist 2>&1 | tail -50
+          echo "=== Looking for nuke.ko in dist/ ==="
+          find dist -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
+          if [ ! -f dist/nuke.ko ]; then
+            echo "=== nuke.ko not in dist/, searching bazel-bin/ ==="
+            find bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
           fi
-          test -f dist/nuke.ko || { echo "ERROR: nuke.ko not found"; exit 1; }
+          test -f dist/nuke.ko || { echo "ERROR: nuke.ko not found anywhere"; exit 1; }
 
       - name: Verify nuke.ko
         run: |
