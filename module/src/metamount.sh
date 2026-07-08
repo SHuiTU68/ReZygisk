@@ -19,6 +19,7 @@ DECOY_MOUNT_FOLDER="/oem"
 mountify_expert_mode=0
 enable_lkm_nuke=0
 lkm_filename="nuke.ko"
+nuke_mount_point=""
 # read config
 PERSISTENT_DIR="/data/adb/rezygisk_meta"
 . $PERSISTENT_DIR/config.sh
@@ -350,16 +351,28 @@ else
 fi
 
 # nuke ext4 sysfs
+ko_loaded=0
 if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$MODDIR/lkm/$lkm_filename" ] &&
         { [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; } &&
         [ "$spoof_sparse" = "0" ]; then
 
-        mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+        # Determine which ext4 mount to nuke. If nuke_mount_point is set in
+        # config.sh, use it; otherwise auto-detect the staging mount.
+        if [ -n "$nuke_mount_point" ]; then
+                mnt="$nuke_mount_point"
+        else
+                mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+        fi
         kptr_set=$(cat /proc/sys/kernel/kptr_restrict)
         echo 1 > /proc/sys/kernel/kptr_restrict
         ptr_address=$(grep " ext4_unregister_sysfs$" /proc/kallsyms | awk {'print "0x"$1'})
         echo "$DMESG_PREFIX: stage2/ext4: loading LKM with mount_point=$mnt symaddr=$ptr_address" >> /dev/kmsg
-        insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" > /dev/null 2>&1
+        if insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" 2>>"$LOG_FOLDER/nuke_err"; then
+                ko_loaded=1
+                echo "$DMESG_PREFIX: stage2/ext4: LKM loaded, nuked $mnt" >> /dev/kmsg
+        else
+                echo "$DMESG_PREFIX: stage2/ext4: LKM load FAILED for $mnt" >> /dev/kmsg
+        fi
         echo $kptr_set > /proc/sys/kernel/kptr_restrict
 
 fi
@@ -368,9 +381,15 @@ fi
 if [ -f "$MODDIR/ksud_has_nuke_ext4" ] && [ "$spoof_sparse" = "0" ] &&
         { [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; }; then
 
-        mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+        if [ -n "$nuke_mount_point" ]; then
+                mnt="$nuke_mount_point"
+        else
+                mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+        fi
         echo "$DMESG_PREFIX: stage2/ext4: ksud kernel nuke-ext4-sysfs $mnt" >> /dev/kmsg
-        /data/adb/ksud kernel nuke-ext4-sysfs "$mnt"
+        if /data/adb/ksud kernel nuke-ext4-sysfs "$mnt" 2>>"$LOG_FOLDER/nuke_err"; then
+                ko_loaded=1
+        fi
 
 fi
 
@@ -393,24 +412,28 @@ busybox umount -l "$MNT_FOLDER"
 case $mountify_mounts in
         1) mode="manual" ;;
         2) mode="auto" ;;
+        *) mode="disabled" ;;
 esac
 
 if [ "$use_ext4_sparse" = "1" ] || [ -f "$MODDIR/no_tmpfs_xattr" ]; then
-        mode="$mode | ext4"
+        staging_mode="ext4"
 else
-        mode="$mode | tmpfs"
+        staging_mode="tmpfs"
 fi
+
+# combined mode string for module.prop description
+mode_full="$mode | $staging_mode"
 
 # display if on litemode
 if [ "$APATCH_BIND_MOUNT" = "true" ] && [ -f /data/adb/.litemode_enable ]; then
-        mode="$mode | litemode"
+        mode_full="$mode_full | litemode"
 fi
 
 # generate description accordingly
-string="description=mode: $mode | no modules mounted"
+string="description=mode: $mode_full | no modules mounted"
 if [ -f $LOG_FOLDER/modules ]; then
         module_list=$( for module in $(cat "$LOG_FOLDER/modules" ) ; do printf "$module " ; done )
-        string="description=mode: $mode | modules: $module_list "
+        string="description=mode: $mode_full | modules: $module_list "
 fi
 
 # only update when generated string is different
@@ -419,11 +442,16 @@ if [ "$desc_current" != "$string" ]; then
         sed -i "s/^description=.*/$string/g" "$MODDIR/module.prop"
 fi
 
-# write status file for WebUI
+# write status file for WebUI — separate fields so the UI can display each
+# independently (e.g. "auto (ext4)" on the home page, ko status, etc.)
 STATUS=/data/adb/.rz_meta_status
 cat > "$STATUS" <<RASTATS
 configured_mode=$mountify_mounts
 effective_mode=$mode
+staging_mode=$staging_mode
+ko_enabled=$enable_lkm_nuke
+ko_loaded=$ko_loaded
+ko_mount_point=$mnt
 source=${KSU:+KSU}${APATCH:+APatch}
 mounted_partitions=$(cat "$LOG_FOLDER/mountify_mount_list" 2>/dev/null | tr '\n' ' ')
 RASTATS

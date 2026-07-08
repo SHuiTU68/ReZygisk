@@ -45,6 +45,31 @@
         <input id="ma_fake_name_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.fakeName.placeholder}}">
       </div>
 
+      <!-- INFO: LKM nuke toggle (ext4 sysfs unregister). Only visible when
+           ext4 staging mode is selected, since the ko only applies to ext4. -->
+      <div id="ma_lkm_card" class="small_card dimc" style="margin-bottom: 10px; display: none;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{settings.lkmNuke.title}}</div>
+          <div class="dimc desc action_card_description">{{settings.lkmNuke.description}}</div>
+        </div>
+        <label class="switch dimc">
+          <input id="ma_lkm_switch" type="checkbox">
+          <span class="slider"></span>
+        </label>
+        <!-- INFO: ko load status from last boot (read from .rz_meta_status) -->
+        <div id="ma_lkm_status" class="dimc" style="font-size: 0.8em; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+      </div>
+
+      <!-- INFO: Custom nuke mount point. Only visible when ko is enabled.
+           Empty = auto (uses staging mount point). -->
+      <div id="ma_lkm_mountpoint_card" class="small_card dimc" style="margin-bottom: 10px; display: none;">
+        <div class="action_card">
+          <div class="dimc content action_card_title">{{settings.lkmNuke.mountPoint.title}}</div>
+          <div class="dimc desc action_card_description">{{settings.lkmNuke.mountPoint.description}}</div>
+        </div>
+        <input id="ma_lkm_mountpoint_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.lkmNuke.mountPoint.placeholder}}">
+      </div>
+
       <!-- INFO: Partition list. All partitions referenced by checked modules
            are mounted by default. User can uncheck to exclude a partition. -->
       <div class="small_card dimc" style="margin-bottom: 0;">

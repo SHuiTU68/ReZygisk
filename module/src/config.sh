@@ -35,7 +35,14 @@ DECOY_MOUNT_FOLDER="/oem"
 mountify_expert_mode=0
 
 # enable_lkm_nuke: 1 = load nuke.ko to unregister ext4 sysfs node
+# Only effective in ext4 mode (use_ext4_sparse=1). The ko unregisters the
+# /proc/fs/ext4/<s_id> node so the ext4 staging mount is harder to detect.
 enable_lkm_nuke=0
 
 # lkm_filename: name of the LKM file
 lkm_filename="nuke.ko"
+
+# nuke_mount_point: which ext4 mount point to nuke the sysfs node for.
+# Empty = auto (uses the staging mount $MNT_FOLDER/$FAKE_MOUNT_NAME).
+# Set to a specific path (e.g. /data/adb/modules) to nuke a different ext4 mount.
+nuke_mount_point=""

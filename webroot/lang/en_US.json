@@ -114,6 +114,18 @@
           "title": "Fake Mount Name",
           "description": "Custom name for the staging point (/mnt/vendor/<name>). Used by tmpfs and ext4 modes.",
           "placeholder": "rezygisk"
+        },
+        "lkmNuke": {
+          "title": "Unregister ext4 sysfs (ko)",
+          "description": "Load nuke.ko to unregister the /proc/fs/ext4 node for the ext4 staging mount, making it harder to detect. Only effective in ext4 mode. Requires kernel 6.6 (Android 15).",
+          "mountPoint": {
+            "title": "Nuke Mount Point",
+            "description": "ext4 mount point to unregister the sysfs node for. Empty = auto (uses staging mount point).",
+            "placeholder": "auto"
+          },
+          "loaded": "loaded",
+          "notLoaded": "not loaded",
+          "loadFailed": "load failed"
         }
       },
       "partitions": {

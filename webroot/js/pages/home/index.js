@@ -65,43 +65,61 @@ async function _getStaticInfo() {
   return _staticInfoCache
 }
 
-// INFO: Detect metamodule activation + read .rz_meta_cfg (user intent) and
-// .rz_meta_status (actual effective mode after probe) to show the current
-// mount mode on the home page. Returns null if metamodule is not active.
-// effectiveMode is what probe actually selected (e.g. "ext4" when "auto"
-// was configured). mode is the user-configured mode.
+// INFO: Detect metamodule activation + read mountify config.sh (user intent)
+// and .rz_meta_status (actual effective mode + staging method after probe) to
+// show the current mount mode on the home page.
+//
+// We read from mountify's config.sh (the file metamount.sh actually sources)
+// rather than the old .rz_meta_cfg, so the displayed mode matches what the
+// boot script will actually use.
+//
+// Status file format (written by metamount.sh):
+//   effective_mode=auto|manual|disabled
+//   staging_mode=tmpfs|ext4
+//   ko_loaded=0|1
 let _metaMountCache = null
 async function _getMetaMountInfo() {
   if (_metaMountCache) return _metaMountCache
   const [linkR, cfgR, statusR] = await Promise.all([
     exec('readlink /data/adb/metamodule 2>/dev/null'),
-    exec('cat /data/adb/.rz_meta_cfg 2>/dev/null'),
+    exec('cat /data/adb/rezygisk_meta/config.sh 2>/dev/null'),
     exec('cat /data/adb/.rz_meta_status 2>/dev/null')
   ])
   const active = (linkR.errno === 0 && /rezygisk$/.test(linkR.stdout.trim()))
   let enabled = false
   let mode = 'auto'
+  // Parse mountify config.sh: mountify_mounts (0=disabled, 2=auto),
+  // use_ext4_sparse (0=tmpfs, 1=ext4)
   if (cfgR.errno === 0) {
+    let mountifyMounts = 2
+    let useExt4Sparse = 0
     cfgR.stdout.split('\n').forEach((line) => {
-      if (line.match(/^enabled=(.+)$/)) enabled = line.split('=')[1].trim() === 'true'
-      if (line.match(/^mount_mode=(.+)$/)) {
-        const v = line.split('=')[1].trim()
-        if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') mode = v
-      }
+      const mm = line.match(/^mountify_mounts=(.+)$/)
+      if (mm) mountifyMounts = parseInt(mm[1].trim()) || 0
+      const ue = line.match(/^use_ext4_sparse=(.+)$/)
+      if (ue) useExt4Sparse = parseInt(ue[1].trim()) || 0
     })
+    enabled = mountifyMounts !== 0
+    mode = useExt4Sparse === 1 ? 'ext4' : 'auto'
   }
-  // INFO: Read the actual effective mode written by metamount.sh after probe.
-  // This lets us show "auto (ext4)" when auto resolved to ext4 at boot.
+  // Parse status file: effective_mode + staging_mode (separate fields)
   let effectiveMode = ''
+  let stagingMode = ''
   if (statusR.errno === 0) {
     statusR.stdout.split('\n').forEach((line) => {
-      if (line.match(/^effective_mode=(.+)$/)) {
-        const v = line.split('=')[1].trim()
-        if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') effectiveMode = v
+      const em = line.match(/^effective_mode=(.+)$/)
+      if (em) {
+        const v = em[1].trim()
+        if (v === 'auto' || v === 'manual' || v === 'disabled') effectiveMode = v
+      }
+      const sm = line.match(/^staging_mode=(.+)$/)
+      if (sm) {
+        const v = sm[1].trim()
+        if (v === 'tmpfs' || v === 'ext4') stagingMode = v
       }
     })
   }
-  _metaMountCache = { active, enabled, mode, effectiveMode }
+  _metaMountCache = { active, enabled, mode, effectiveMode, stagingMode }
   return _metaMountCache
 }
 
@@ -219,6 +237,9 @@ export async function loadOnceView() {
   document.getElementById('root_impl').innerHTML = root_impl
 
   // INFO: Show meta mount mode row only when metamodule is active.
+  // Display format: "已启用 · auto · ext4" — showing both the effective mode
+  // (auto/manual) and the actual staging method (tmpfs/ext4) from the last
+  // boot. If no status file yet (first boot), show configured mode only.
   const metaClassEl = document.getElementById('meta_mount_class')
   const metaRowEl = document.getElementById('meta_mount_row')
   const metaStatusEl = document.getElementById('meta_mount_status')
@@ -229,15 +250,18 @@ export async function loadOnceView() {
       if (!metaMount.enabled) {
         metaStatusEl.innerHTML = strings.info.metaMount.disabled
       } else {
-        // INFO: Show configured mode; if effective mode differs (e.g. auto
-        // resolved to ext4), append it in parentheses: "auto (ext4)".
-        const configuredLabel = strings.info.metaMount.modes[metaMount.mode] || metaMount.mode
-        let label = configuredLabel
-        if (metaMount.effectiveMode && metaMount.effectiveMode !== metaMount.mode) {
-          const effLabel = strings.info.metaMount.modes[metaMount.effectiveMode] || metaMount.effectiveMode
-          label = `${configuredLabel} (${effLabel})`
+        // Build label: effective mode + staging method
+        // e.g. "auto · ext4" or "auto · tmpfs"
+        let modeLabel
+        if (metaMount.effectiveMode && metaMount.stagingMode) {
+          // Has runtime status — show actual values
+          modeLabel = `${metaMount.effectiveMode} · ${metaMount.stagingMode}`
+        } else {
+          // No status yet (first boot or not run) — show configured mode
+          const configuredLabel = strings.info.metaMount.modes[metaMount.mode] || metaMount.mode
+          modeLabel = configuredLabel
         }
-        metaStatusEl.innerHTML = `${strings.info.metaMount.enabled} · ${label}`
+        metaStatusEl.innerHTML = `${strings.info.metaMount.enabled} · ${modeLabel}`
       }
     }
   }

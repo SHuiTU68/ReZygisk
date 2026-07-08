@@ -2,26 +2,40 @@ import { exec } from '../../kernelsu.js'
 
 const MA_CFG_PATH = '/data/adb/.rz_meta_cfg'
 const MA_MODULES_DIR = '/data/adb/modules'
+// INFO: mountify config.sh — the file metamount.sh actually sources on boot.
+// The WebUI writes mountify_mounts, use_ext4_sparse, enable_lkm_nuke,
+// FAKE_MOUNT_NAME, and nuke_mount_point here via sed (same approach as
+// mountify's own WebUI).
+const MA_MOUNTIFY_CFG = '/data/adb/rezygisk_meta/config.sh'
+const MA_STATUS_PATH = '/data/adb/.rz_meta_status'
 
 // INFO: MetaMount state. `isMetamodule` is true only when Hrezygisk is the
 // active metamodule (/data/adb/metamodule symlink resolves to rezygisk), i.e.
-// only on KernelSU/APatch. The other fields mirror .rz_meta_cfg keys that
-// metamount.sh sources on every boot.
+// only on KernelSU/APatch.
 //
-// WHITELIST MODEL: includeModules is a whitelist — a module is mounted ONLY
-// if its id is in the list. Default empty = no modules mounted. This is the
-// inverse of the old skip_modules blacklist: checking a box in the UI now
-// means "mount this module" (intuitive), not "exclude this module".
+// mountify settings (read from config.sh, written via sed):
+//   mountifyMounts: 0=disabled, 2=auto (mountify_mounts in config.sh)
+//   useExt4Sparse: 0=tmpfs, 1=ext4 (use_ext4_sparse in config.sh)
+//   enableLkmNuke: 0=off, 1=on (enable_lkm_nuke in config.sh)
+//   fakeName: staging folder name (FAKE_MOUNT_NAME in config.sh)
+//   nukeMountPoint: custom ext4 mount to nuke (nuke_mount_point in config.sh)
+//
+// Runtime status (read from .rz_meta_status):
+//   effectiveMode: "auto" or "manual" (what mountify_mounts resolved to)
+//   stagingMode: "tmpfs" or "ext4" (actual staging method used)
+//   koLoaded: 0 or 1 (whether ko was actually loaded last boot)
+//   koMountPoint: the mount point that was nuked
 const MetaMountState = {
   isMetamodule: false,
   metaEnabled: false,
   mountMode: 'auto',
   effectiveMode: '',
+  stagingMode: '',
   fakeName: 'rezygisk',
-  // INFO: excludedPartitions is a BLACKLIST of partitions the user has
-  // unchecked. By default all discovered partitions are mounted (empty
-  // exclude list = mount all). This replaces the old allowedPartitions
-  // permit model where dangerous partitions needed explicit opt-in.
+  enableLkmNuke: false,
+  nukeMountPoint: '',
+  koLoaded: 0,
+  koMountPoint: '',
   excludedPartitions: [],
   includeModules: [],
   availableModules: [],
@@ -36,23 +50,97 @@ async function _loadMetamoduleStatus() {
   MetaMountState.isMetamodule = (r.errno === 0 && /rezygisk$/.test(r.stdout.trim()))
 }
 
-// INFO: Read runtime status file written by metamount.sh after probe. This
-// contains the ACTUAL effective mount mode (e.g. "ext4" when "auto" was
-// configured), so the UI can show "auto (ext4)". Also contains the list of
-// mounted partitions.
+// INFO: Read runtime status file written by metamount.sh after probe.
+// New format (separate fields):
+//   effective_mode=auto|manual|disabled
+//   staging_mode=tmpfs|ext4
+//   ko_enabled=0|1
+//   ko_loaded=0|1
+//   ko_mount_point=/mnt/...
 async function _loadMetaStatus() {
   MetaMountState.effectiveMode = ''
-  const r = await exec('cat /data/adb/.rz_meta_status 2>/dev/null')
+  MetaMountState.stagingMode = ''
+  MetaMountState.koLoaded = 0
+  MetaMountState.koMountPoint = ''
+  const r = await exec(`cat ${MA_STATUS_PATH} 2>/dev/null`)
   if (r.errno !== 0) return
   r.stdout.split('\n').forEach((line) => {
     const em = line.match(/^effective_mode=(.+)$/)
     if (em) {
       const v = em[1].trim()
-      if (v === 'auto' || v === 'tmpfs' || v === 'ext4' || v === 'direct') {
+      if (v === 'auto' || v === 'manual' || v === 'disabled') {
         MetaMountState.effectiveMode = v
       }
     }
+    const sm = line.match(/^staging_mode=(.+)$/)
+    if (sm) {
+      const v = sm[1].trim()
+      if (v === 'tmpfs' || v === 'ext4') MetaMountState.stagingMode = v
+    }
+    const kl = line.match(/^ko_loaded=(.+)$/)
+    if (kl) MetaMountState.koLoaded = parseInt(kl[1].trim()) || 0
+    const kmp = line.match(/^ko_mount_point=(.+)$/)
+    if (kmp) MetaMountState.koMountPoint = kmp[1].trim()
   })
+}
+
+// INFO: Read mountify config.sh — the file metamount.sh sources on boot.
+// This is the AUTHORITATIVE config for mountify_mounts, use_ext4_sparse,
+// enable_lkm_nuke, FAKE_MOUNT_NAME, nuke_mount_point.
+// We map these to the WebUI's higher-level concepts:
+//   mountify_mounts 0 → disabled, non-0 → enabled
+//   use_ext4_sparse 1 → ext4 mode, 0 → auto/tmpfs mode
+//   enable_lkm_nuke 1 → ko on
+async function _loadMountifyCfg() {
+  MetaMountState.metaEnabled = false
+  MetaMountState.mountMode = 'auto'
+  MetaMountState.fakeName = 'rezygisk'
+  MetaMountState.enableLkmNuke = false
+  MetaMountState.nukeMountPoint = ''
+  const r = await exec(`cat ${MA_MOUNTIFY_CFG} 2>/dev/null`)
+  if (r.errno !== 0) return
+  let mountifyMounts = 2
+  let useExt4Sparse = 0
+  r.stdout.split('\n').forEach((line) => {
+    const mm = line.match(/^mountify_mounts=(.+)$/)
+    if (mm) {
+      mountifyMounts = parseInt(mm[1].trim()) || 0
+      return
+    }
+    const ue = line.match(/^use_ext4_sparse=(.+)$/)
+    if (ue) {
+      useExt4Sparse = parseInt(ue[1].trim()) || 0
+      return
+    }
+    const el = line.match(/^enable_lkm_nuke=(.+)$/)
+    if (el) {
+      MetaMountState.enableLkmNuke = (parseInt(el[1].trim()) || 0) === 1
+      return
+    }
+    const fn = line.match(/^FAKE_MOUNT_NAME="?(.+?)"?$/)
+    if (fn) {
+      MetaMountState.fakeName = fn[1].trim() || 'rezygisk'
+      return
+    }
+    const nmp = line.match(/^nuke_mount_point="?(.*?)"?$/)
+    if (nmp) {
+      MetaMountState.nukeMountPoint = nmp[1].trim()
+    }
+  })
+  // Map mountify values to WebUI concepts
+  MetaMountState.metaEnabled = mountifyMounts !== 0
+  MetaMountState.mountMode = useExt4Sparse === 1 ? 'ext4' : 'auto'
+}
+
+// INFO: Write a single mountify config key to config.sh using sed.
+// Uses the same sed approach as mountify's WebUI (file.js).
+// Ensures the config dir exists first.
+async function _writeMountifyKey(key, value, isString) {
+  const safeValue = String(value).replace(/["\\]/g, '')
+  if (isString) {
+    return exec(`mkdir -p /data/adb/rezygisk_meta && sed -i 's|^${key}=.*|${key}="${safeValue}"|' ${MA_MOUNTIFY_CFG}`)
+  }
+  return exec(`mkdir -p /data/adb/rezygisk_meta && sed -i 's|^${key}=.*|${key}=${safeValue}|' ${MA_MOUNTIFY_CFG}`)
 }
 
 // INFO: Read all metamodule config from .rz_meta_cfg. Format (sourced by
@@ -201,6 +289,11 @@ function _syncUI() {
   const enabledSwitch = document.getElementById('ma_enabled_switch')
   const modeSelect = document.getElementById('ma_mode_select')
   const nameInput = document.getElementById('ma_fake_name_input')
+  const lkmCard = document.getElementById('ma_lkm_card')
+  const lkmSwitch = document.getElementById('ma_lkm_switch')
+  const lkmStatusEl = document.getElementById('ma_lkm_status')
+  const lkmMpCard = document.getElementById('ma_lkm_mountpoint_card')
+  const lkmMpInput = document.getElementById('ma_lkm_mountpoint_input')
 
   const active = MetaMountState.isMetamodule
   if (notActiveEl) notActiveEl.style.display = active ? 'none' : 'block'
@@ -212,21 +305,53 @@ function _syncUI() {
   if (modeSelect) modeSelect.value = MetaMountState.mountMode
   if (nameInput) nameInput.value = MetaMountState.fakeName
 
-  // INFO: Show the effective mode (actual mode after boot probe) when it
-  // differs from the configured mode. E.g. configured "auto" resolved to
-  // "ext4" displays "auto (ext4)" — same format as the home page.
+  // INFO: Show the effective mode + staging method after boot probe.
+  // E.g. configured "auto" with staging "ext4" shows "auto · ext4".
   const effEl = document.getElementById('ma_effective_mode')
   if (effEl) {
-    if (MetaMountState.effectiveMode &&
-        MetaMountState.effectiveMode !== MetaMountState.mountMode &&
-        MetaMountState.metaEnabled) {
+    if (MetaMountState.metaEnabled && MetaMountState.effectiveMode) {
       effEl.style.display = 'block'
-      effEl.innerText = `${MetaMountState.mountMode} (${MetaMountState.effectiveMode})`
+      let label = MetaMountState.effectiveMode
+      if (MetaMountState.stagingMode) {
+        label = `${label} · ${MetaMountState.stagingMode}`
+      }
+      effEl.innerText = label
     } else {
       effEl.style.display = 'none'
     }
   }
+
+  // INFO: Show ko toggle only when ext4 mode is selected (ko only works
+  // with ext4 staging). Also show mount_point input when ko is enabled.
+  const isExt4 = MetaMountState.mountMode === 'ext4'
+  if (lkmCard) lkmCard.style.display = (active && isExt4) ? 'block' : 'none'
+  if (lkmSwitch) lkmSwitch.checked = MetaMountState.enableLkmNuke
+  if (lkmMpCard) lkmMpCard.style.display = (active && isExt4 && MetaMountState.enableLkmNuke) ? 'block' : 'none'
+  if (lkmMpInput) lkmMpInput.value = MetaMountState.nukeMountPoint
+
+  // INFO: Show ko load status from last boot
+  if (lkmStatusEl) {
+    if (MetaMountState.enableLkmNuke && MetaMountState.effectiveMode) {
+      lkmStatusEl.style.display = 'block'
+      let statusText
+      if (MetaMountState.koLoaded === 1) {
+        statusText = `${strings_cache?.settings?.lkmNuke?.loaded || 'loaded'}`
+        if (MetaMountState.koMountPoint) {
+          statusText += `: ${MetaMountState.koMountPoint}`
+        }
+      } else {
+        statusText = `${strings_cache?.settings?.lkmNuke?.loadFailed || 'load failed'}`
+      }
+      lkmStatusEl.innerText = statusText
+    } else {
+      lkmStatusEl.style.display = 'none'
+    }
+  }
 }
+
+// INFO: Cache strings for use in _syncUI (which is called before strings are
+// available in some cases).
+let strings_cache = null
 
 // INFO: Build the module list DOM. A checked checkbox means the module IS in
 // include_modules (i.e. WILL be mounted by metamount.sh). This is the intuitive
@@ -340,34 +465,65 @@ function _renderPartitionList() {
 }
 
 // INFO: Wire up change listeners for settings controls. Each change updates
-// state and persists immediately.
+// state and persists immediately. Mountify settings (enabled, mode, ko, name,
+// mount_point) are written to config.sh via sed. Module/partition lists are
+// written to .rz_meta_cfg (legacy, used for display).
 function _setupListeners() {
   const enabledSwitch = document.getElementById('ma_enabled_switch')
   const modeSelect = document.getElementById('ma_mode_select')
   const nameInput = document.getElementById('ma_fake_name_input')
+  const lkmSwitch = document.getElementById('ma_lkm_switch')
+  const lkmMpInput = document.getElementById('ma_lkm_mountpoint_input')
 
   if (enabledSwitch) {
     enabledSwitch.addEventListener('change', () => {
       MetaMountState.metaEnabled = enabledSwitch.checked
+      // Map: enabled → mountify_mounts (0=disabled, 2=auto)
+      _writeMountifyKey('mountify_mounts', enabledSwitch.checked ? 2 : 0, false)
       _writeMetaCfg()
+      _syncUI()
     })
   }
   if (modeSelect) {
     modeSelect.addEventListener('change', () => {
       MetaMountState.mountMode = modeSelect.value
+      // Map: ext4 → use_ext4_sparse=1, auto/tmpfs/direct → use_ext4_sparse=0
+      const useExt4 = modeSelect.value === 'ext4' ? 1 : 0
+      _writeMountifyKey('use_ext4_sparse', useExt4, false)
       _writeMetaCfg()
+      _syncUI()
     })
   }
   if (nameInput) {
     nameInput.addEventListener('change', () => {
       MetaMountState.fakeName = nameInput.value.trim() || 'rezygisk'
       nameInput.value = MetaMountState.fakeName
+      _writeMountifyKey('FAKE_MOUNT_NAME', MetaMountState.fakeName, true)
       _writeMetaCfg()
     })
     nameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault()
         nameInput.blur()
+      }
+    })
+  }
+  if (lkmSwitch) {
+    lkmSwitch.addEventListener('change', () => {
+      MetaMountState.enableLkmNuke = lkmSwitch.checked
+      _writeMountifyKey('enable_lkm_nuke', lkmSwitch.checked ? 1 : 0, false)
+      _syncUI()
+    })
+  }
+  if (lkmMpInput) {
+    lkmMpInput.addEventListener('change', () => {
+      MetaMountState.nukeMountPoint = lkmMpInput.value.trim()
+      _writeMountifyKey('nuke_mount_point', MetaMountState.nukeMountPoint, true)
+    })
+    lkmMpInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        lkmMpInput.blur()
       }
     })
   }
@@ -387,9 +543,16 @@ export async function onceViewAfterUpdate() {
 
 export async function load() {
   await _loadMetamoduleStatus()
+  await _loadMountifyCfg()
   await _loadMetaCfg()
   await _loadMetaStatus()
   await _loadAvailableModules()
+  // Cache strings for _syncUI (used in ko status display)
+  try {
+    const { getStrings } = await import('../pageLoader.js')
+    const { whichCurrentPage } = await import('../navbar.js')
+    strings_cache = (await getStrings(whichCurrentPage())) || null
+  } catch { strings_cache = null }
   _syncUI()
   _renderPartitionList()
   _renderModuleList()
