@@ -367,27 +367,49 @@ else
         mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
 fi
 
+# INFO: resolve_ext4_symaddr — resolve ext4_unregister_sysfs address from
+# /proc/kallsyms. We use mountify's prebuilt ko (no auto-resolve), so the
+# shell layer must supply symaddr explicitly. This function compensates by
+# grepping kallsyms with kptr_restrict temporarily relaxed, then validates
+# the address. Returns address on stdout (e.g. 0xffff...), returns 1 on fail.
+resolve_ext4_symaddr() {
+        _kptr_saved=$(cat /proc/sys/kernel/kptr_restrict 2>/dev/null || echo 1)
+        # kptr_restrict=1: root can still read kallsyms (non-root sees 0x0).
+        echo 1 > /proc/sys/kernel/kptr_restrict 2>/dev/null || true
+        _addr=$(grep -m1 ' ext4_unregister_sysfs$' /proc/kallsyms 2>/dev/null | awk '{print "0x"$1}')
+        echo "$_kptr_saved" > /proc/sys/kernel/kptr_restrict 2>/dev/null || true
+        # Validate: must be 0x + hex digits, and not all zeros.
+        case "$_addr" in
+                0x0000000000000000|0x0|"")
+                        return 1 ;;
+                0x*)
+                        printf '%s' "$_addr"
+                        return 0 ;;
+                *)
+                        return 1 ;;
+        esac
+}
+
 if [ "$enable_hide" = "1" ] && [ "$is_ext4_mode" = "1" ] && [ "$spoof_sparse" = "0" ]; then
+        # Path A: load nuke.ko to unregister ext4 sysfs node.
         if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$MODDIR/lkm/$lkm_filename" ]; then
-                kptr_set=$(cat /proc/sys/kernel/kptr_restrict)
-                echo 1 > /proc/sys/kernel/kptr_restrict
-                # INFO: The improved nuke.ko auto-resolves ext4_unregister_sysfs via
-                # kallsyms_lookup_name (kprobe trick on >= 5.7). We still grep the
-                # address as a fallback and pass it via symaddr — if kallsyms_lookup_name
-                # is unavailable, the ko uses symaddr instead.
-                ptr_address=$(grep " ext4_unregister_sysfs$" /proc/kallsyms | awk {'print "0x"$1'})
-                echo "$DMESG_PREFIX: stage2/ext4: loading LKM with mount_point=$mnt symaddr=$ptr_address" >> /dev/kmsg
-                if insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" 2>>"$LOG_FOLDER/nuke_err"; then
-                        ko_loaded=1
-                        echo "$DMESG_PREFIX: stage2/ext4: LKM loaded, nuked $mnt" >> /dev/kmsg
+                _symaddr=$(resolve_ext4_symaddr)
+                if [ -n "$_symaddr" ]; then
+                        echo "$DMESG_PREFIX: stage2/ext4: loading LKM mount_point=$mnt symaddr=$_symaddr" >> /dev/kmsg
+                        if insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$_symaddr" 2>>"$LOG_FOLDER/nuke_err"; then
+                                ko_loaded=1
+                                echo "$DMESG_PREFIX: stage2/ext4: LKM loaded, nuked $mnt" >> /dev/kmsg
+                        else
+                                echo "$DMESG_PREFIX: stage2/ext4: LKM load FAILED for $mnt" >> /dev/kmsg
+                                cat "$LOG_FOLDER/nuke_err" >> /dev/kmsg
+                        fi
                 else
-                        echo "$DMESG_PREFIX: stage2/ext4: LKM load FAILED for $mnt" >> /dev/kmsg
-                        cat "$LOG_FOLDER/nuke_err" >> /dev/kmsg
+                        echo "$DMESG_PREFIX: stage2/ext4: cannot resolve ext4_unregister_sysfs, ko not loaded" >> /dev/kmsg
+                        echo "resolve_ext4_symaddr: symbol not found in /proc/kallsyms" >> "$LOG_FOLDER/nuke_err"
                 fi
-                echo $kptr_set > /proc/sys/kernel/kptr_restrict
         fi
 
-        # ksud kernel nuke-ext4-sysfs (KernelSU 22105+ has native support)
+        # Path B: ksud kernel nuke-ext4-sysfs (KernelSU 22105+ has native support).
         if [ -f "$MODDIR/ksud_has_nuke_ext4" ]; then
                 echo "$DMESG_PREFIX: stage2/ext4: ksud kernel nuke-ext4-sysfs $mnt" >> /dev/kmsg
                 if /data/adb/ksud kernel nuke-ext4-sysfs "$mnt" 2>>"$LOG_FOLDER/nuke_err"; then
