@@ -1,6 +1,6 @@
-/* INFO: Code shared with settings page */
+/* Actions page — uses MiuiX variables from /css/index.css */
 .dimc {
-  background: var(--dim);
+  background: var(--surface-dim);
   word-break: break-word;
 }
 
@@ -24,13 +24,16 @@
 
 .button {
   padding: 1em 0 1em 0;
-  border-radius: 30px;
-  transition: transform 0.1s ease-in-out;
-  background-color: var(--button);
+  border-radius: var(--radius-xl);
+  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1),
+              transform 0.1s ease-in-out;
+  background-color: var(--surface-container-high);
+  color: var(--on-surface);
 }
 
 .button:active {
-  transform: scale(90%);
+  transform: scale(96%);
+  border-radius: var(--radius-lg);
 }
 
 /* Responsive CSS */
@@ -42,13 +45,7 @@
   }
   .button {
     padding: 25px 0 25px 0;
-    border-radius: 40px;
     margin: 0.5em 0 0.5em;
-    transition: transform 0.15s ease-in-out;
-    background-color: var(--button);
     font-size: 18px;
-  }
-  .button:active {
-    transform: scale(90%);
   }
 }

@@ -1,67 +1,74 @@
-/* INFO: M3/MiuiX styling for the metamount page.
- * Builds on the global m3-* tokens defined in /css/index.css.
- * Cards are grouped into m3-group containers with seamless list items. */
+/* ============================================================
+ * MiuiX styling for the metamount page.
+ * Uses KSU-compatible variables (--primary, --surface, --outline, etc.)
+ * defined globally in /css/index.css.
+ * ============================================================ */
 
 /* Page container */
 .ma-page {
   padding: 0 0 40px 0;
 }
 
-/* Status banner — uses M3 secondary container for subtle emphasis */
+/* Status banner — secondary container for subtle emphasis */
 .ma-status-banner {
   margin: 0 15px 16px 15px;
   padding: 16px 20px;
-  border-radius: var(--m3-shape-xl);
-  background-color: var(--m3-secondary-container);
-  color: var(--m3-on-secondary-container);
+  border-radius: var(--radius-xl);
+  background-color: var(--secondary-container);
+  color: var(--on-secondary-container);
   font-size: 0.9em;
   line-height: 1.5;
 }
 
 .ma-status-banner.ma-error {
-  background-color: var(--m3-error-container);
-  color: var(--m3-on-error-container);
+  background-color: var(--error-container);
+  color: var(--on-error-container);
 }
 
 /* Section title — MiuiX style: primary-colored small label */
 .ma-section-title {
-  margin: 20px 16px 8px 16px;
-  font-size: 0.75em;
-  color: var(--m3-primary);
+  margin: 18px 20px 6px 20px;
+  font-size: 0.78em;
+  color: var(--primary);
   user-select: none;
-  font-weight: 500;
-  letter-spacing: 0.4px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
   text-transform: uppercase;
 }
 
-/* M3 group container */
+/* MiuiX group container */
 .ma-group {
-  border-radius: var(--m3-shape-xl);
+  border-radius: var(--radius-xl);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin: 0 15px 16px 15px;
-  background-color: transparent;
+  background-color: var(--surface);
 }
 
-/* M3 list item — tonal surface, press radius animation */
+/* MiuiX list item — tonal surface, press radius animation (sink effect) */
 .ma-item {
   display: flex;
   align-items: center;
   gap: 16px;
-  min-height: 64px;
-  border-radius: var(--m3-shape-xs);
-  padding: 16px 20px;
+  min-height: 60px;
+  border-radius: var(--radius-xs);
+  padding: 14px 20px;
   box-sizing: border-box;
-  background-color: var(--m3-tonal-surface);
-  color: var(--m3-on-surface);
+  background-color: var(--surface);
+  color: var(--on-surface);
   position: relative;
-  transition: border-radius 0.2s ease, background-color 0.2s ease;
+  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1),
+              background-color 0.2s ease;
 }
 
 .ma-item:active {
-  border-radius: var(--m3-shape-xl);
+  border-radius: var(--radius-xl);
+  background-color: var(--surface-container-high);
+}
+
+.ma-item + .ma-item {
+  border-top: 1px solid var(--outline-variant);
 }
 
 /* Item text block (title + description) */
@@ -72,14 +79,14 @@
 
 .ma-item-title {
   font-size: 0.95em;
-  color: var(--m3-on-surface);
+  color: var(--on-surface);
   margin-bottom: 2px;
   word-break: break-word;
 }
 
 .ma-item-desc {
   font-size: 0.78em;
-  color: var(--m3-on-surface-variant);
+  color: var(--on-surface-variant);
   line-height: 1.4;
   word-break: break-word;
 }
@@ -87,28 +94,28 @@
 /* Status sub-text under an item (e.g. effective mode, ko status) */
 .ma-item-status {
   font-size: 0.75em;
-  color: var(--m3-on-surface-variant);
+  color: var(--on-surface-variant);
   margin-top: 4px;
 }
 
 .ma-item-status.ma-ok {
-  color: var(--m3-primary);
+  color: var(--primary);
 }
 
 .ma-item-status.ma-err {
-  color: var(--m3-error);
+  color: var(--error);
 }
 
-/* M3 input — outlined style with outline-variant border */
+/* MiuiX input — outlined style with outline-variant border */
 .ma-input,
 .ma-select {
   width: 100%;
   box-sizing: border-box;
   padding: 12px 14px;
-  border-radius: var(--m3-shape-sm);
-  border: 1px solid var(--m3-outline-variant);
-  background-color: var(--m3-surface-container-low);
-  color: var(--m3-on-surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--outline-variant);
+  background-color: var(--surface-container);
+  color: var(--on-surface);
   font-size: 0.9em;
   font-family: var(--font-family);
   outline: none;
@@ -120,19 +127,19 @@
 
 .ma-input:focus,
 .ma-select:focus {
-  border-color: var(--m3-primary);
+  border-color: var(--primary);
   border-width: 2px;
   padding: 11px 13px;
 }
 
 .ma-input::placeholder {
-  color: var(--m3-on-surface-variant);
+  color: var(--on-surface-variant);
   opacity: 0.7;
 }
 
 /* Select dropdown arrow */
 .ma-select {
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23938F99' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%236E6E73' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 36px;
@@ -154,7 +161,6 @@
 .ma-sublist {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin-top: 8px;
 }
 
@@ -163,21 +169,27 @@
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-radius: var(--m3-shape-xs);
-  background-color: var(--m3-surface-container);
-  color: var(--m3-on-surface);
+  border-radius: var(--radius-xs);
+  background-color: var(--surface-container);
+  color: var(--on-surface);
   font-size: 0.88em;
-  transition: border-radius 0.2s ease, background-color 0.2s ease;
+  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1),
+              background-color 0.2s ease;
 }
 
 .ma-sublist-item:active {
-  border-radius: var(--m3-shape-lg);
+  border-radius: var(--radius-lg);
+  background-color: var(--surface-container-high);
+}
+
+.ma-sublist-item + .ma-sublist-item {
+  border-top: 1px solid var(--outline-variant);
 }
 
 .ma-sublist-checkbox {
   width: 20px;
   height: 20px;
-  accent-color: var(--m3-primary);
+  accent-color: var(--primary);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -189,13 +201,13 @@
 
 .ma-sublist-meta {
   font-size: 0.78em;
-  color: var(--m3-on-surface-variant);
+  color: var(--on-surface-variant);
 }
 
 .ma-empty {
   padding: 12px 16px;
   font-size: 0.85em;
-  color: var(--m3-on-surface-variant);
+  color: var(--on-surface-variant);
   font-style: italic;
 }
 
@@ -203,13 +215,13 @@
   margin: 8px 16px 0 16px;
   padding: 12px 16px;
   font-size: 0.78em;
-  color: var(--m3-on-surface-variant);
+  color: var(--on-surface-variant);
   line-height: 1.5;
-  border-radius: var(--m3-shape-md);
-  background-color: var(--m3-surface-container-low);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-container);
 }
 
-/* Switch override — use global .switch but ensure it fits in m3 item */
+/* Switch override — use global .switch but ensure it fits in item */
 .ma-item .switch {
   margin-left: 0;
 }

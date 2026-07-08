@@ -1,57 +1,63 @@
+/* ============================================================
+ * MiuiX theme tokens — KSU-compatible variable names.
+ * Values follow HyperOS / miuix-kotlin-multiplatform palette.
+ * Variables: --primary, --on-primary, --surface, --on-surface,
+ * --surface-variant, --on-surface-variant, --outline, --outline-variant,
+ * --secondary-container, --on-secondary-container, --error, etc.
+ * ============================================================ */
 :root {
-  --background: #141414;
-  --font: #fff;
-  --desc: #c9c9c9;
-  --bright: #8d1d19;
-  --dim: #1c1c1c;
-  --dim-brigther: #3d3d3d;
-  --icon: #494949;
-  --icon-bc: #292929;
-  --small-card: var(--icon-bc);
-  --button: var(--background);
-  --button-enabled: #535353;
-  --desktop-navbar: #252525;
-  --desktop-navicon: #3a3a3a;
+  /* MiuiX color roles (dark defaults; themes override via JS) */
+  --primary: #4996F3;
+  --on-primary: #FFFFFF;
+  --primary-container: #0D3E8E;
+  --on-primary-container: #CDE0FF;
+  --secondary: #8AB1FA;
+  --on-secondary: #002A6B;
+  --secondary-container: #1E3A66;
+  --on-secondary-container: #CDE0FF;
+  --tertiary: #6FCB9E;
+  --error: #FF8A80;
+  --on-error: #4A0000;
+  --error-container: #5D1A1A;
+  --on-error-container: #FFDAD4;
 
-  /* INFO: M3 (Material Design 3) design tokens — mapped from KSU's
-   * mui.kernelsu.org color scheme. These provide the M3 color roles
-   * (primary, surface, outline, etc.) used by M3-style components.
-   * Values are baseline M3 purple; themes override via JS. */
-  --m3-primary: #D0BCFF;
-  --m3-on-primary: #381E72;
-  --m3-primary-container: #4F378B;
-  --m3-on-primary-container: #EADDFF;
-  --m3-secondary: #CCC2DC;
-  --m3-on-secondary: #332D41;
-  --m3-secondary-container: #4A4458;
-  --m3-on-secondary-container: #E8DEF8;
-  --m3-tertiary: #EFB8C8;
-  --m3-error: #F2B8B5;
-  --m3-on-error: #601410;
-  --m3-error-container: #8C1D18;
-  --m3-on-error-container: #F9DEDC;
-  --m3-background: #141218;
-  --m3-on-background: #E6E0E9;
-  --m3-surface: #141218;
-  --m3-on-surface: #E6E0E9;
-  --m3-surface-variant: #49454F;
-  --m3-on-surface-variant: #CAC4D0;
-  --m3-outline: #938F99;
-  --m3-outline-variant: #49454F;
-  --m3-tonal-surface: #211F26;
-  --m3-surface-container-lowest: #0F0D13;
-  --m3-surface-container-low: #1D1B20;
-  --m3-surface-container: #211F26;
-  --m3-surface-container-high: #2B2930;
-  --m3-surface-container-highest: #36343B;
+  /* Surfaces */
+  --background: #0E0E0F;
+  --on-background: #E6E6E6;
+  --surface: #1A1A1C;
+  --on-surface: #E6E6E6;
+  --surface-variant: #2A2A2D;
+  --on-surface-variant: #B0B0B4;
+  --surface-container: #232325;
+  --surface-container-high: #2D2D30;
+  --surface-container-highest: #38383B;
+  --surface-dim: #141416;
+  --surface-bright: #3A3A3D;
+  --outline: #6E6E73;
+  --outline-variant: #3A3A3D;
+  --scrim: #000000;
 
-  /* M3 shape scale */
-  --m3-shape-xs: 4px;
-  --m3-shape-sm: 8px;
-  --m3-shape-md: 12px;
-  --m3-shape-lg: 16px;
-  --m3-shape-xl: 20px;
-  --m3-shape-full: 9999px;
+  /* Legacy aliases (for back-compat with existing page CSS) */
+  --font: var(--on-background);
+  --desc: var(--on-surface-variant);
+  --bright: var(--primary);
+  --dim: var(--surface-dim);
+  --dim-brigther: var(--surface-container-high);
+  --icon: var(--outline);
+  --icon-bc: var(--surface-container);
+  --small-card: var(--surface-container);
+  --button: var(--surface-container-high);
+  --button-enabled: var(--primary);
+  --desktop-navbar: var(--surface);
+  --desktop-navicon: var(--surface-container);
+
+  /* MiuiX shape scale (HyperOS rounded corners) */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
 
   /* Locked Color */
   --lock: #fff;
@@ -68,8 +74,7 @@
 body {
   margin: 0;
   overscroll-behavior: none;
-
-  /* INFO: WebUI X insets */
+  /* WebUI X insets */
   padding-top: var(--window-inset-top);
   padding-bottom: var(--window-inset-bottom);
 }
@@ -78,6 +83,9 @@ a {
   text-decoration: none !important;
 }
 
+/* ============================================================
+ * Layout
+ * ============================================================ */
 .header {
   display: flex;
   position: sticky;
@@ -96,13 +104,6 @@ a {
   margin-bottom: 120px;
 }
 
-.card {
-  margin: 0 15px 10px 15px;
-  padding: 15px 15px;
-  border-radius: var(--m3-shape-lg);
-  color: var(--lock);
-}
-
 .content {
   padding-bottom: 5px;
 }
@@ -117,64 +118,83 @@ a {
   display: flex;
 }
 
-/* INFO: MiuiX-style card — tonal surface + press feedback (radius anim).
- * Static state: small radius (4px). Pressed (:active): expands to 20px.
- * This is the signature MiuiX interaction (HyperOS "sink" effect). */
+/* ============================================================
+ * MiuiX Card — grouped rounded container with tonal surface.
+ * Used as outer wrapper for lists of items.
+ * ============================================================ */
+.card {
+  margin: 0 15px 10px 15px;
+  padding: 15px 15px;
+  border-radius: var(--radius-xl);
+  color: var(--lock);
+  background-color: var(--surface);
+}
+
+/* MiuiX group — wraps multiple list items, seamless, overflow hidden.
+ * This is the signature HyperOS "card group" pattern. */
+.miuix-group {
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: 0 15px 10px 15px;
+  background-color: var(--surface);
+}
+
+/* MiuiX group section title — primary-colored small label */
+.miuix-group-title {
+  margin: 18px 20px 6px 20px;
+  font-size: 0.78em;
+  color: var(--primary);
+  user-select: none;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* MiuiX list item — tonal surface, press radius animation (sink effect).
+ * Static: radius-xs (4px). Pressed: radius-xl (24px). HyperOS signature. */
+.miuix-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 60px;
+  padding: 14px 20px;
+  box-sizing: border-box;
+  background-color: var(--surface);
+  color: var(--on-surface);
+  position: relative;
+  border-radius: var(--radius-xs);
+  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1),
+              background-color 0.2s ease;
+}
+
+.miuix-item:active {
+  border-radius: var(--radius-xl);
+  background-color: var(--surface-container-high);
+}
+
+.miuix-item + .miuix-item {
+  border-top: 1px solid var(--outline-variant);
+}
+
+/* small_card — compact card with press feedback (legacy, kept for compat) */
 .small_card {
   background: var(--small-card);
-  border-radius: var(--m3-shape-lg);
+  border-radius: var(--radius-xl);
   padding: 5px 15px 0 15px;
   margin: 0px 15px 0 15px;
   padding-bottom: 5px;
   justify-content: space-between;
   display: flex;
   align-items: center;
-  transition: border-radius 0.2s ease;
+  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .small_card_bg {
   background-color: var(--small-card);
 }
 
-/* INFO: MiuiX group container — wraps multiple list items into a single
- * rounded group with overflow hidden so items appear seamless. */
-.m3-group {
-  border-radius: var(--m3-shape-xl);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0 15px 10px 15px;
-}
-
-/* M3 group section title (MiuiX style: primary-colored small label) */
-.m3-group-title {
-  margin: 0 16px 8px 16px;
-  font-size: 0.75em;
-  color: var(--m3-primary);
-  user-select: none;
-  font-weight: 500;
-}
-
-/* M3 list item — tonal surface, 64px height, press radius animation */
-.m3-list-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: 64px;
-  border-radius: var(--m3-shape-xs);
-  padding: 16px;
-  box-sizing: border-box;
-  background-color: var(--m3-tonal-surface);
-  position: relative;
-  transition: border-radius 0.2s ease;
-}
-
-.m3-list-item:active {
-  border-radius: var(--m3-shape-xl);
-}
-
-/* Card type */
+/* Card type variants */
 .bright {
   border: 5px solid var(--bright);
   background: var(--bright);
@@ -195,7 +215,86 @@ a {
   word-break: break-word;
 }
 
-/* Animation KeyFrames */
+/* ============================================================
+ * MiuiX Switch — HyperOS style.
+ * Track: pill, outline border when off, primary fill when on.
+ * Thumb: small (off) → grows (on), outline color → on-primary.
+ * ============================================================ */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 32px;
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background-color: var(--surface-container-highest);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--outline);
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: var(--outline);
+  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+
+input:checked + .slider:before {
+  transform: translate(20px, -50%);
+  background-color: var(--on-primary);
+  height: 24px;
+  width: 24px;
+}
+
+/* ============================================================
+ * Action card (home / actions pages)
+ * ============================================================ */
+.action_card {
+  display: inline-block;
+  width: 80%;
+  transition: opacity 0.5s;
+}
+
+.action_card_title {
+  font-size: 1.1em;
+  padding-left: 5px;
+  padding-top: 6px;
+  padding-bottom: 2px;
+}
+
+.action_card_description {
+  font-size: 0.9em;
+  padding-left: 5px;
+  padding-bottom: 6px;
+}
+
+/* ============================================================
+ * Animations
+ * ============================================================ */
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -231,6 +330,9 @@ a {
   100% { transform: scale(1); opacity: 1; }
 }
 
+/* ============================================================
+ * Page loader (transitions)
+ * ============================================================ */
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -320,92 +422,11 @@ body {
 }
 
 @keyframes pageLoaderMiniIn {
-  0% {
-    transform: translateX(100%);
-  }
-  100% {
-    transform: translateX(0%);
-  }
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(0%); }
 }
 
 @keyframes pageLoaderMiniOut {
-  0% {
-    transform: translateX(0%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
 }
-
-/* INFO: M3-style switch — wider track, primary color when checked,
- * larger thumb, smoother animation. Inspired by KSU's M3 implementation. */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 52px;
-  height: 32px;
-  margin-left: 10px;
-  flex-shrink: 0;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  inset: 0;
-  cursor: pointer;
-  background-color: var(--m3-surface-container-highest);
-  transition: background-color 0.2s ease;
-  border-radius: var(--m3-shape-full);
-  border: 2px solid var(--m3-outline);
-}
-
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 16px;
-  width: 16px;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  background-color: var(--m3-outline);
-  transition: all 0.2s ease;
-  border-radius: 50%;
-}
-
-input:checked + .slider {
-  background-color: var(--m3-primary);
-  border-color: var(--m3-primary);
-  transition: background-color 0.2s ease;
-}
-
-input:checked + .slider:before {
-  transform: translate(20px, -50%);
-  background-color: var(--m3-on-primary);
-  height: 24px;
-  width: 24px;
-}
-
-.action_card {
-  display: inline-block;
-  width: 80%;
-  transition: opacity 0.5s;
-}
-
-.action_card_title {
-  font-size: 1.1em;
-  padding-left: 5px;
-  padding-top: 6px;
-  padding-bottom: 2px;
-}
-
-.action_card_description {
-  font-size: 0.9em;
-  padding-left: 5px;
-  padding-bottom: 6px;
-}
-
