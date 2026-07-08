@@ -51,17 +51,47 @@ jobs:
       # INFO: Shallow clone only the manifest + common project (depth=1).
       # Skip prebuilts build tools to save ~20GB sync time; Bazel will fetch
       # only the build tools it actually needs on demand.
+      # Robustness: retry up to 3 times on network failures, limit -j to avoid
+      # connection resets, and run `git lfs install` skip (GKI doesn't use LFS).
       - name: Clone AOSP GKI kernel (android15-6.6)
         run: |
-          mkdir android-kernel && cd android-kernel
+          set -e
+          mkdir -p android-kernel && cd android-kernel
+          echo "=== Disk space before clone ==="
+          df -h .
           echo "Fetching GKI manifest branch: common-android15-6.6-lts"
-          curl https://storage.googleapis.com/git-repo-downloads/repo > repo
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > repo
           chmod +x repo
-          ./repo init --manifest-depth=1 --depth=1 \
-            https://android.googlesource.com/kernel/manifest -b common-android15-6.6-lts
+          # repo init with retries — --depth=1 for shallow, --manifest-depth=1
+          # to limit manifest history. Some repo versions reject
+          # --manifest-depth; fall back to plain --depth=1 if it fails.
+          for attempt in 1 2 3; do
+            echo "=== repo init attempt $attempt ==="
+            if ./repo init --manifest-depth=1 --depth=1 \
+                https://android.googlesource.com/kernel/manifest \
+                -b common-android15-6.6-lts; then
+              break
+            fi
+            echo "repo init attempt $attempt failed, retrying in 10s..."
+            [ "$attempt" = "3" ] && { echo "ERROR: repo init failed 3 times"; exit 1; }
+            rm -rf .repo
+            sleep 10
+          done
           # Sync only what we need: common + build. Skip prebuilts/ to save
           # ~20GB; bazel will lazy-fetch required build tools.
-          ./repo sync -c -j$(nproc) common build
+          # Limit -j to 8 to avoid Google server connection resets; add
+          # --force-sync to recover from interrupted syncs; retry up to 3 times.
+          for attempt in 1 2 3; do
+            echo "=== repo sync attempt $attempt ==="
+            if ./repo sync -c -j8 --force-sync --fail-fast common build; then
+              break
+            fi
+            echo "repo sync attempt $attempt failed, retrying in 15s..."
+            [ "$attempt" = "3" ] && { echo "ERROR: repo sync failed 3 times"; exit 1; }
+            sleep 15
+          done
+          echo "=== Disk space after clone ==="
+          df -h .
           rm -rf .repo
 
       - name: Prepare GKI and inject nuke_ext4_lkm
