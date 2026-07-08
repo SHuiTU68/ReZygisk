@@ -79,21 +79,75 @@ RASTATS
 
 _meta_log "=== metamount.sh invoked (pid=$$) ==="
 
-# INFO: Detect the root implementation. KSU sets KSU=true env var; APatch sets
-# APATCH=true. Fall back to directory existence checks. Magisk is excluded by
-# post-fs-data.sh but we double-check here for safety.
-if [ "$(which magisk)" ]; then
-  _meta_log "Magisk detected — metamodule not supported, exiting"
-  _write_status "unsupported_magisk"
-  exit 0
-fi
+# INFO: Detect the root implementation and its bin directory.
+#
+# Supported implementations:
+#   - KernelSU (official, tiann/KernelSU)           env: KSU=true, dir: /data/adb/ksu
+#   - KernelSU-Next                                  env: KSU=true, dir: /data/adb/ksu
+#   - SukiSU / Magic KSU / other KSU forks           env: KSU=true, dir: /data/adb/ksu
+#   - APatch (bmax121/APatch)                        env: APATCH=true, dir: /data/adb/ap
+#
+# All KSU branches share the same KSU=true env var and /data/adb/ksu directory
+# convention (they're API-compatible forks). APatch uses APATCH=true and
+# /data/adb/ap. We set SOURCE to "KSU" or "APatch" (the literal string the
+# overlay mount source must be, so zygiskd umount_root can identify them).
+#
+# ROOT_BIN_DIR points to the implementation's bundled busybox/mke2fs/etc, used
+# for tool discovery later. We search multiple candidate paths for robustness.
+_detect_root_impl() {
+  if [ "$(which magisk)" ]; then
+    _meta_log "root impl: Magisk (metamodule not supported)"
+    return 1
+  fi
 
-if [ "$KSU" = "true" ] || [ -d /data/adb/ksu ]; then
-  SOURCE=KSU
-elif [ "$APATCH" = "true" ] || [ -d /data/adb/ap ]; then
-  SOURCE=APatch
-else
-  _meta_log "no KSU/APatch detected, exiting"
+  # INFO: APatch detection. APATCH env var is set by APatch's post-fs-data
+  # runner. Some older APatch builds only have the /data/adb/ap directory.
+  if [ "$APATCH" = "true" ] || [ -d /data/adb/ap ]; then
+    SOURCE=APatch
+    for d in /data/adb/ap/bin /data/adb/ap/bin/ap; do
+      [ -d "$d" ] && ROOT_BIN_DIR="$d" && break
+    done
+    _meta_log "root impl: APatch (ROOT_BIN_DIR=${ROOT_BIN_DIR:-none})"
+    return 0
+  fi
+
+  # INFO: KSU detection — covers official KernelSU, KernelSU-Next, SukiSU,
+  # Magic KSU, and all other API-compatible forks. They all set KSU=true and
+  # use /data/adb/ksu. Some forks may use /data/adb/ksud or other variants.
+  if [ "$KSU" = "true" ] || [ -d /data/adb/ksu ]; then
+    SOURCE=KSU
+    for d in /data/adb/ksu/bin /data/adb/ksud/bin /data/adb/magisk/bin; do
+      [ -d "$d" ] && ROOT_BIN_DIR="$d" && break
+    done
+    _meta_log "root impl: KSU (variant via env/dir, ROOT_BIN_DIR=${ROOT_BIN_DIR:-none})"
+    return 0
+  fi
+
+  # INFO: Fallback — scan /data/adb/ for known root impl directories. This
+  # catches forks that don't set the env var and use non-standard dir names.
+  for d in /data/adb/ksu /data/adb/ksud /data/adb/ap /data/adb/apatch; do
+    if [ -d "$d" ]; then
+      case "$d" in
+        */ap|*/apatch)
+          SOURCE=APatch
+          ROOT_BIN_DIR="$d/bin"
+          ;;
+        *)
+          SOURCE=KSU
+          ROOT_BIN_DIR="$d/bin"
+          ;;
+      esac
+      _meta_log "root impl: $SOURCE (fallback dir scan: $d, ROOT_BIN_DIR=${ROOT_BIN_DIR:-none})"
+      return 0
+    fi
+  done
+
+  _meta_log "root impl: none detected (KSU=$KSU APATCH=$APATCH)"
+  return 1
+}
+
+ROOT_BIN_DIR=""
+if ! _detect_root_impl; then
   _write_status "no_root_impl"
   exit 0
 fi
@@ -307,19 +361,21 @@ _try_setup_ext4() {
   case "$img" in /data/adb/.rz_meta_rw/*) ;; *) return 1;; esac
   case "$mnt" in /mnt/vendor/*) ;; *) return 1;; esac
 
+  # INFO: Search for e2fsprogs tools in: system paths, ROOT_BIN_DIR (detected
+  # root impl's bin dir, covers all KSU forks + APatch), and PATH.
   mke2fs_bin=""
-  for p in /system/bin/mke2fs /system/xbin/mke2fs /data/adb/ksu/bin/mke2fs /data/adb/ap/bin/mke2fs; do
+  for p in /system/bin/mke2fs /system/xbin/mke2fs "${ROOT_BIN_DIR}/mke2fs" "$(which mke2fs 2>/dev/null)"; do
     [ -x "$p" ] && mke2fs_bin="$p" && break
   done
   [ -z "$mke2fs_bin" ] && return 1
 
   resize2fs_bin=""
-  for p in /system/bin/resize2fs /system/xbin/resize2fs /data/adb/ksu/bin/resize2fs /data/adb/ap/bin/resize2fs; do
+  for p in /system/bin/resize2fs /system/xbin/resize2fs "${ROOT_BIN_DIR}/resize2fs" "$(which resize2fs 2>/dev/null)"; do
     [ -x "$p" ] && resize2fs_bin="$p" && break
   done
 
   e2fsck_bin=""
-  for p in /system/bin/e2fsck /system/xbin/e2fsck /data/adb/ksu/bin/e2fsck /data/adb/ap/bin/e2fsck; do
+  for p in /system/bin/e2fsck /system/xbin/e2fsck "${ROOT_BIN_DIR}/e2fsck" "$(which e2fsck 2>/dev/null)"; do
     [ -x "$p" ] && e2fsck_bin="$p" && break
   done
 
