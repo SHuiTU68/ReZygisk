@@ -13,6 +13,46 @@
   --desktop-navbar: #252525;
   --desktop-navicon: #3a3a3a;
 
+  /* INFO: M3 (Material Design 3) design tokens — mapped from KSU's
+   * mui.kernelsu.org color scheme. These provide the M3 color roles
+   * (primary, surface, outline, etc.) used by M3-style components.
+   * Values are baseline M3 purple; themes override via JS. */
+  --m3-primary: #D0BCFF;
+  --m3-on-primary: #381E72;
+  --m3-primary-container: #4F378B;
+  --m3-on-primary-container: #EADDFF;
+  --m3-secondary: #CCC2DC;
+  --m3-on-secondary: #332D41;
+  --m3-secondary-container: #4A4458;
+  --m3-on-secondary-container: #E8DEF8;
+  --m3-tertiary: #EFB8C8;
+  --m3-error: #F2B8B5;
+  --m3-on-error: #601410;
+  --m3-error-container: #8C1D18;
+  --m3-on-error-container: #F9DEDC;
+  --m3-background: #141218;
+  --m3-on-background: #E6E0E9;
+  --m3-surface: #141218;
+  --m3-on-surface: #E6E0E9;
+  --m3-surface-variant: #49454F;
+  --m3-on-surface-variant: #CAC4D0;
+  --m3-outline: #938F99;
+  --m3-outline-variant: #49454F;
+  --m3-tonal-surface: #211F26;
+  --m3-surface-container-lowest: #0F0D13;
+  --m3-surface-container-low: #1D1B20;
+  --m3-surface-container: #211F26;
+  --m3-surface-container-high: #2B2930;
+  --m3-surface-container-highest: #36343B;
+
+  /* M3 shape scale */
+  --m3-shape-xs: 4px;
+  --m3-shape-sm: 8px;
+  --m3-shape-md: 12px;
+  --m3-shape-lg: 16px;
+  --m3-shape-xl: 20px;
+  --m3-shape-full: 9999px;
+
   /* Locked Color */
   --lock: #fff;
   --font-family: 'Roboto', 'sans-serif';
@@ -59,7 +99,7 @@ a {
 .card {
   margin: 0 15px 10px 15px;
   padding: 15px 15px;
-  border-radius: 15px;
+  border-radius: var(--m3-shape-lg);
   color: var(--lock);
 }
 
@@ -77,19 +117,61 @@ a {
   display: flex;
 }
 
+/* INFO: MiuiX-style card — tonal surface + press feedback (radius anim).
+ * Static state: small radius (4px). Pressed (:active): expands to 20px.
+ * This is the signature MiuiX interaction (HyperOS "sink" effect). */
 .small_card {
   background: var(--small-card);
-  border-radius: 15px;
+  border-radius: var(--m3-shape-lg);
   padding: 5px 15px 0 15px;
   margin: 0px 15px 0 15px;
   padding-bottom: 5px;
   justify-content: space-between;
   display: flex;
   align-items: center;
+  transition: border-radius 0.2s ease;
 }
 
 .small_card_bg {
   background-color: var(--small-card);
+}
+
+/* INFO: MiuiX group container — wraps multiple list items into a single
+ * rounded group with overflow hidden so items appear seamless. */
+.m3-group {
+  border-radius: var(--m3-shape-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 15px 10px 15px;
+}
+
+/* M3 group section title (MiuiX style: primary-colored small label) */
+.m3-group-title {
+  margin: 0 16px 8px 16px;
+  font-size: 0.75em;
+  color: var(--m3-primary);
+  user-select: none;
+  font-weight: 500;
+}
+
+/* M3 list item — tonal surface, 64px height, press radius animation */
+.m3-list-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  border-radius: var(--m3-shape-xs);
+  padding: 16px;
+  box-sizing: border-box;
+  background-color: var(--m3-tonal-surface);
+  position: relative;
+  transition: border-radius 0.2s ease;
+}
+
+.m3-list-item:active {
+  border-radius: var(--m3-shape-xl);
 }
 
 /* Card type */
@@ -255,13 +337,15 @@ body {
   }
 }
 
-/* INFO: Treat Wheel switch controls */
+/* INFO: M3-style switch — wider track, primary color when checked,
+ * larger thumb, smoother animation. Inspired by KSU's M3 implementation. */
 .switch {
   position: relative;
   display: inline-block;
-  width: 60px;
-  height: 34px;
+  width: 52px;
+  height: 32px;
   margin-left: 10px;
+  flex-shrink: 0;
 }
 
 .switch input {
@@ -274,30 +358,36 @@ body {
   position: absolute;
   inset: 0;
   cursor: pointer;
-  background-color: var(--button);
-  transition: 0.4s;
-  border-radius: 34px;
+  background-color: var(--m3-surface-container-highest);
+  transition: background-color 0.2s ease;
+  border-radius: var(--m3-shape-full);
+  border: 2px solid var(--m3-outline);
 }
 
 .slider:before {
   position: absolute;
   content: "";
-  height: 23px;
-  width: 23px;
+  height: 16px;
+  width: 16px;
   left: 6px;
-  bottom: 6px;
-  background-color: var(--desc);
-  transition: 0.4s;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: var(--m3-outline);
+  transition: all 0.2s ease;
   border-radius: 50%;
 }
 
 input:checked + .slider {
-  background-color: var(--button-enabled);
-  transition: 0.6s;
+  background-color: var(--m3-primary);
+  border-color: var(--m3-primary);
+  transition: background-color 0.2s ease;
 }
 
 input:checked + .slider:before {
-  transform: translateX(26px);
+  transform: translate(20px, -50%);
+  background-color: var(--m3-on-primary);
+  height: 24px;
+  width: 24px;
 }
 
 .action_card {

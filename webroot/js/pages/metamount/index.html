@@ -1,31 +1,34 @@
-<div class="panel">
+<div class="panel ma-page">
   <div class="header">Hrezygisk: {{title}}</div>
 
-  <div class="dimc" style="margin: 0 15px 0 15px; border-radius: 20px;">
-    <!-- INFO: Status / not-active notice -->
-    <div id="ma_not_active" class="dimc" style="padding: 15px 22px; border-radius: 20px; font-size: 0.9em; color: var(--text-secondary);">
-      {{notActive}}
-    </div>
+  <!-- INFO: Status / not-active notice — M3 secondary container banner -->
+  <div id="ma_not_active" class="ma-status-banner">
+    {{notActive}}
+  </div>
 
-    <!-- INFO: Settings card: enable / mode / name -->
-    <div id="ma_settings" class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px; display: none;">
-      <div class="small_card dimc" style="margin-bottom: 10px;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{settings.enabled.title}}</div>
-          <div class="dimc desc action_card_description">{{settings.enabled.description}}</div>
+  <!-- INFO: Settings group — enabled toggle + mount mode + fake name -->
+  <div id="ma_settings" style="display: none;">
+    <div class="ma-section-title">{{settings.sectionBasic}}</div>
+    <div class="ma-group">
+      <!-- Enable toggle -->
+      <div class="ma-item">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{settings.enabled.title}}</div>
+          <div class="ma-item-desc">{{settings.enabled.description}}</div>
         </div>
-        <label class="switch dimc">
+        <label class="switch">
           <input id="ma_enabled_switch" type="checkbox">
           <span class="slider"></span>
         </label>
       </div>
 
-      <div class="small_card dimc" style="margin-bottom: 10px;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{settings.mountMode.title}}</div>
-          <div class="dimc desc action_card_description">{{settings.mountMode.description}}</div>
+      <!-- Mount mode select -->
+      <div class="ma-item ma-item-vertical">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{settings.mountMode.title}}</div>
+          <div class="ma-item-desc">{{settings.mountMode.description}}</div>
         </div>
-        <select id="ma_mode_select" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em;">
+        <select id="ma_mode_select" class="ma-select">
           <option value="auto">{{settings.mountMode.auto}}</option>
           <option value="tmpfs">{{settings.mountMode.tmpfs}}</option>
           <option value="ext4">{{settings.mountMode.ext4}}</option>
@@ -34,88 +37,88 @@
         <!-- INFO: Shows the ACTUAL effective mode after boot probe, e.g.
              "auto → ext4". Only visible when effective mode differs from
              the configured mode. -->
-        <div id="ma_effective_mode" class="dimc" style="font-size: 0.8em; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+        <div id="ma_effective_mode" class="ma-item-status" style="display: none;"></div>
       </div>
 
-      <div class="small_card dimc" style="margin-bottom: 10px;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{settings.fakeName.title}}</div>
-          <div class="dimc desc action_card_description">{{settings.fakeName.description}}</div>
+      <!-- Fake mount name input -->
+      <div class="ma-item ma-item-vertical">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{settings.fakeName.title}}</div>
+          <div class="ma-item-desc">{{settings.fakeName.description}}</div>
         </div>
-        <input id="ma_fake_name_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.fakeName.placeholder}}">
+        <input id="ma_fake_name_input" type="text" class="ma-input" placeholder="{{settings.fakeName.placeholder}}">
       </div>
+    </div>
 
-      <!-- INFO: Hide toggle — works in BOTH tmpfs and ext4 modes.
-           tmpfs: unmounts stage1 staging tmpfs
-           ext4: loads nuke.ko + unmounts stage2 image -->
-      <div id="ma_lkm_card" class="small_card dimc" style="margin-bottom: 10px;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{settings.lkmNuke.title}}</div>
-          <div class="dimc desc action_card_description">{{settings.lkmNuke.description}}</div>
+    <!-- INFO: Hide & ko section — works in BOTH tmpfs and ext4 modes. -->
+    <div class="ma-section-title">{{settings.sectionHide}}</div>
+    <div class="ma-group">
+      <!-- Hide toggle — generic, both modes -->
+      <div class="ma-item">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{settings.lkmNuke.title}}</div>
+          <div class="ma-item-desc">{{settings.lkmNuke.description}}</div>
         </div>
-        <label class="switch dimc">
+        <label class="switch">
           <input id="ma_lkm_switch" type="checkbox">
           <span class="slider"></span>
         </label>
-        <!-- INFO: hide status from last boot (read from .rz_meta_status) -->
-        <div id="ma_lkm_status" class="dimc" style="font-size: 0.8em; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+      </div>
+
+      <!-- INFO: Hide status from last boot (read from .rz_meta_status).
+           Shown inline below the toggle when hide is enabled. -->
+      <div id="ma_lkm_status" class="ma-item ma-item-vertical" style="display: none;">
+        <div class="ma-item-text">
+          <div id="ma_lkm_status_text" class="ma-item-status"></div>
+        </div>
       </div>
 
       <!-- INFO: Custom nuke mount point. Only visible in ext4 mode + hide on.
            Empty = auto (uses staging mount point). Ignored in tmpfs mode. -->
-      <div id="ma_lkm_mountpoint_card" class="small_card dimc" style="margin-bottom: 10px; display: none;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{settings.lkmNuke.mountPoint.title}}</div>
-          <div class="dimc desc action_card_description">{{settings.lkmNuke.mountPoint.description}}</div>
+      <div id="ma_lkm_mountpoint_card" class="ma-item ma-item-vertical" style="display: none;">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{settings.lkmNuke.mountPoint.title}}</div>
+          <div class="ma-item-desc">{{settings.lkmNuke.mountPoint.description}}</div>
         </div>
-        <input id="ma_lkm_mountpoint_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.lkmNuke.mountPoint.placeholder}}">
-      </div>
-
-      <!-- INFO: Partition list. All partitions referenced by checked modules
-           are mounted by default. User can uncheck to exclude a partition. -->
-      <div class="small_card dimc" style="margin-bottom: 0;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{partitions.title}}</div>
-          <div class="dimc desc action_card_description">{{partitions.description}}</div>
-        </div>
+        <input id="ma_lkm_mountpoint_input" type="text" class="ma-input" placeholder="{{settings.lkmNuke.mountPoint.placeholder}}">
       </div>
     </div>
 
-    <!-- INFO: Partition allow list -->
-    <div id="ma_partitions" class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px; display: none;">
-      <div id="ma_no_partitions" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0; display: none;">
-        {{partitions.noPartitions}}
-      </div>
-
-      <div id="ma_partition_list" style="display: flex; flex-direction: column; gap: 8px;"></div>
-
-      <div class="dimc" style="font-size: 0.8em; color: var(--text-secondary); padding-top: 10px;">
-        {{partitions.note}}
-      </div>
-    </div>
-
-    <!-- INFO: Exclusion list -->
-    <div id="ma_exclusions" class="small_card_bg" style="padding: 15px 20px 15px 20px; border-radius: 20px; margin-top: 10px; display: none;">
-      <div class="small_card dimc" style="margin-bottom: 10px;">
-        <div class="action_card">
-          <div class="dimc content action_card_title">{{exclusions.title}}</div>
-          <div class="dimc desc action_card_description">{{exclusions.description}}</div>
+    <!-- INFO: Partition list. All partitions referenced by checked modules
+         are mounted by default. User can uncheck to exclude a partition. -->
+    <div class="ma-section-title">{{partitions.title}}</div>
+    <div class="ma-group">
+      <div class="ma-item ma-item-vertical">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{partitions.title}}</div>
+          <div class="ma-item-desc">{{partitions.description}}</div>
         </div>
+        <div id="ma_no_partitions" class="ma-empty" style="display: none;">
+          {{partitions.noPartitions}}
+        </div>
+        <div id="ma_partition_list" class="ma-sublist"></div>
+        <div class="ma-item-status">{{partitions.note}}</div>
       </div>
-
-      <div id="ma_no_modules" class="dimc" style="font-size: 0.85em; color: var(--text-secondary); padding: 6px 0; display: none;">
-        {{exclusions.noModules}}
-      </div>
-
-      <div id="ma_module_list" style="display: flex; flex-direction: column; gap: 8px;"></div>
-
-      <div class="dimc" style="font-size: 0.8em; color: var(--text-secondary); padding-top: 10px;">
-        {{exclusions.note}}
-      </div>
-    </div>
-
-    <div class="dimc" style="padding: 15px 22px 20px; font-size: 0.85em; color: var(--text-secondary);">
-      {{note}}
     </div>
   </div>
+
+  <!-- INFO: Exclusion list — modules to skip mounting -->
+  <div id="ma_exclusions" style="display: none;">
+    <div class="ma-section-title">{{exclusions.title}}</div>
+    <div class="ma-group">
+      <div class="ma-item ma-item-vertical">
+        <div class="ma-item-text">
+          <div class="ma-item-title">{{exclusions.title}}</div>
+          <div class="ma-item-desc">{{exclusions.description}}</div>
+        </div>
+        <div id="ma_no_modules" class="ma-empty" style="display: none;">
+          {{exclusions.noModules}}
+        </div>
+        <div id="ma_module_list" class="ma-sublist"></div>
+        <div class="ma-item-status">{{exclusions.note}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ma-note">{{note}}</div>
 </div>

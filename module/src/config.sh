@@ -37,15 +37,15 @@ mountify_expert_mode=0
 # enable_hide: 1 = enable anti-detection hiding (default on)
 # - tmpfs mode: unmount the stage1 /mnt tmpfs after per-dir overlays are set
 #   up, so the tmpfs staging point itself disappears.
-# - ext4 mode: load nuke.ko to unregister the /proc/fs/ext4 sysfs node, then
-#   unmount the stage2 ext4 image.
+# - ext4 mode: unmount the stage2 ext4 image. The ko (enable_lkm_nuke) is a
+#   separate manual toggle below.
 # Both modes keep the per-dir overlays (the actual module mounts) intact.
 enable_hide=1
 
-# enable_lkm_nuke: 1 = load nuke.ko (auto-enabled when enable_hide=1 in ext4
-# mode). Kept as a separate knob for advanced users who want to disable just
-# the ko while keeping stage1 unmount.
-enable_lkm_nuke=1
+# enable_lkm_nuke: 1 = load nuke.ko to unregister ext4 sysfs node.
+# MANUAL toggle (default off) — only relevant in ext4 mode. Requires
+# enable_hide=1 to take effect. Needs kernel 6.6 (Android 15).
+enable_lkm_nuke=0
 
 # lkm_filename: name of the LKM file
 lkm_filename="nuke.ko"

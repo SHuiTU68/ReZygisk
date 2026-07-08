@@ -1,1 +1,215 @@
-/* INFO: Reuses global styles from index.css */
+/* INFO: M3/MiuiX styling for the metamount page.
+ * Builds on the global m3-* tokens defined in /css/index.css.
+ * Cards are grouped into m3-group containers with seamless list items. */
+
+/* Page container */
+.ma-page {
+  padding: 0 0 40px 0;
+}
+
+/* Status banner — uses M3 secondary container for subtle emphasis */
+.ma-status-banner {
+  margin: 0 15px 16px 15px;
+  padding: 16px 20px;
+  border-radius: var(--m3-shape-xl);
+  background-color: var(--m3-secondary-container);
+  color: var(--m3-on-secondary-container);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.ma-status-banner.ma-error {
+  background-color: var(--m3-error-container);
+  color: var(--m3-on-error-container);
+}
+
+/* Section title — MiuiX style: primary-colored small label */
+.ma-section-title {
+  margin: 20px 16px 8px 16px;
+  font-size: 0.75em;
+  color: var(--m3-primary);
+  user-select: none;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+/* M3 group container */
+.ma-group {
+  border-radius: var(--m3-shape-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 15px 16px 15px;
+  background-color: transparent;
+}
+
+/* M3 list item — tonal surface, press radius animation */
+.ma-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  border-radius: var(--m3-shape-xs);
+  padding: 16px 20px;
+  box-sizing: border-box;
+  background-color: var(--m3-tonal-surface);
+  color: var(--m3-on-surface);
+  position: relative;
+  transition: border-radius 0.2s ease, background-color 0.2s ease;
+}
+
+.ma-item:active {
+  border-radius: var(--m3-shape-xl);
+}
+
+/* Item text block (title + description) */
+.ma-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ma-item-title {
+  font-size: 0.95em;
+  color: var(--m3-on-surface);
+  margin-bottom: 2px;
+  word-break: break-word;
+}
+
+.ma-item-desc {
+  font-size: 0.78em;
+  color: var(--m3-on-surface-variant);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Status sub-text under an item (e.g. effective mode, ko status) */
+.ma-item-status {
+  font-size: 0.75em;
+  color: var(--m3-on-surface-variant);
+  margin-top: 4px;
+}
+
+.ma-item-status.ma-ok {
+  color: var(--m3-primary);
+}
+
+.ma-item-status.ma-err {
+  color: var(--m3-error);
+}
+
+/* M3 input — outlined style with outline-variant border */
+.ma-input,
+.ma-select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: var(--m3-shape-sm);
+  border: 1px solid var(--m3-outline-variant);
+  background-color: var(--m3-surface-container-low);
+  color: var(--m3-on-surface);
+  font-size: 0.9em;
+  font-family: var(--font-family);
+  outline: none;
+  transition: border-color 0.2s ease;
+  margin: 8px 0 4px 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ma-input:focus,
+.ma-select:focus {
+  border-color: var(--m3-primary);
+  border-width: 2px;
+  padding: 11px 13px;
+}
+
+.ma-input::placeholder {
+  color: var(--m3-on-surface-variant);
+  opacity: 0.7;
+}
+
+/* Select dropdown arrow */
+.ma-select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23938F99' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+/* Vertical item (input/select stacked below title) */
+.ma-item-vertical {
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  padding: 14px 20px;
+}
+
+.ma-item-vertical .ma-item-text {
+  margin-bottom: 4px;
+}
+
+/* Sub-list (partitions / modules) inside a group */
+.ma-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.ma-sublist-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--m3-shape-xs);
+  background-color: var(--m3-surface-container);
+  color: var(--m3-on-surface);
+  font-size: 0.88em;
+  transition: border-radius 0.2s ease, background-color 0.2s ease;
+}
+
+.ma-sublist-item:active {
+  border-radius: var(--m3-shape-lg);
+}
+
+.ma-sublist-checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--m3-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ma-sublist-name {
+  flex: 1;
+  word-break: break-word;
+}
+
+.ma-sublist-meta {
+  font-size: 0.78em;
+  color: var(--m3-on-surface-variant);
+}
+
+.ma-empty {
+  padding: 12px 16px;
+  font-size: 0.85em;
+  color: var(--m3-on-surface-variant);
+  font-style: italic;
+}
+
+.ma-note {
+  margin: 8px 16px 0 16px;
+  padding: 12px 16px;
+  font-size: 0.78em;
+  color: var(--m3-on-surface-variant);
+  line-height: 1.5;
+  border-radius: var(--m3-shape-md);
+  background-color: var(--m3-surface-container-low);
+}
+
+/* Switch override — use global .switch but ensure it fits in m3 item */
+.ma-item .switch {
+  margin-left: 0;
+}

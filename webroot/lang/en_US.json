@@ -98,6 +98,8 @@
       "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
       "note": "Changes take effect on next reboot. No module is mounted by default — check the modules you want to mount; all their partitions are mounted automatically.",
       "settings": {
+        "sectionBasic": "Basic Settings",
+        "sectionHide": "Hide & Unregister",
         "enabled": {
           "title": "Enable Meta Mount",
           "description": "Toggle metamodule mount on/off. When off, modules are not mounted by Hrezygisk."

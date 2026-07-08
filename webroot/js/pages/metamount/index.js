@@ -292,13 +292,12 @@ function _syncUI() {
   const notActiveEl = document.getElementById('ma_not_active')
   const settingsEl = document.getElementById('ma_settings')
   const exclusionsEl = document.getElementById('ma_exclusions')
-  const partitionsEl = document.getElementById('ma_partitions')
   const enabledSwitch = document.getElementById('ma_enabled_switch')
   const modeSelect = document.getElementById('ma_mode_select')
   const nameInput = document.getElementById('ma_fake_name_input')
-  const lkmCard = document.getElementById('ma_lkm_card')
   const lkmSwitch = document.getElementById('ma_lkm_switch')
   const lkmStatusEl = document.getElementById('ma_lkm_status')
+  const lkmStatusTextEl = document.getElementById('ma_lkm_status_text')
   const lkmMpCard = document.getElementById('ma_lkm_mountpoint_card')
   const lkmMpInput = document.getElementById('ma_lkm_mountpoint_input')
 
@@ -306,7 +305,6 @@ function _syncUI() {
   if (notActiveEl) notActiveEl.style.display = active ? 'none' : 'block'
   if (settingsEl) settingsEl.style.display = active ? 'block' : 'none'
   if (exclusionsEl) exclusionsEl.style.display = active ? 'block' : 'none'
-  if (partitionsEl) partitionsEl.style.display = active ? 'block' : 'none'
 
   if (enabledSwitch) enabledSwitch.checked = MetaMountState.metaEnabled
   if (modeSelect) modeSelect.value = MetaMountState.mountMode
@@ -328,32 +326,34 @@ function _syncUI() {
     }
   }
 
-  // INFO: Hide toggle — visible in BOTH tmpfs and ext4 modes (not just ext4).
+  // INFO: Hide toggle — always visible when metamodule active (both tmpfs/ext4).
   // The mount_point input is only relevant to ext4 mode, so it stays gated.
   const isExt4 = MetaMountState.mountMode === 'ext4'
-  if (lkmCard) lkmCard.style.display = active ? 'block' : 'none'
   if (lkmSwitch) lkmSwitch.checked = MetaMountState.enableHide
   // mount_point input: only in ext4 mode + hide enabled
-  if (lkmMpCard) lkmMpCard.style.display = (active && isExt4 && MetaMountState.enableHide) ? 'block' : 'none'
+  if (lkmMpCard) lkmMpCard.style.display = (active && isExt4 && MetaMountState.enableHide) ? 'flex' : 'none'
   if (lkmMpInput) lkmMpInput.value = MetaMountState.nukeMountPoint
 
   // INFO: Show hide status from last boot. In tmpfs mode, hideActive reflects
   // stage1 unmount; in ext4 mode, koLoaded reflects ko load success.
-  if (lkmStatusEl) {
+  if (lkmStatusEl && lkmStatusTextEl) {
     if (MetaMountState.enableHide && MetaMountState.effectiveMode) {
-      lkmStatusEl.style.display = 'block'
+      lkmStatusEl.style.display = 'flex'
       // Determine success: in ext4 mode check koLoaded; in tmpfs check hideActive
       const success = isExt4 ? (MetaMountState.koLoaded === 1) : (MetaMountState.hideActive === 1)
       let statusText
+      lkmStatusTextEl.className = 'ma-item-status'
       if (success) {
         statusText = `${strings_cache?.settings?.lkmNuke?.loaded || 'hidden'}`
+        lkmStatusTextEl.classList.add('ma-ok')
         if (isExt4 && MetaMountState.koMountPoint) {
           statusText += `: ${MetaMountState.koMountPoint}`
         }
       } else {
         statusText = `${strings_cache?.settings?.lkmNuke?.loadFailed || 'hide failed'}`
+        lkmStatusTextEl.classList.add('ma-err')
       }
-      lkmStatusEl.innerText = statusText
+      lkmStatusTextEl.innerText = statusText
     } else {
       lkmStatusEl.style.display = 'none'
     }
@@ -387,21 +387,15 @@ function _renderModuleList() {
 
   for (const mod of MetaMountState.availableModules) {
     const included = MetaMountState.includeModules.includes(mod.id)
-    const card = document.createElement('div')
-    card.className = 'small_card dimc'
-    card.style.marginBottom = '0'
+    const item = document.createElement('div')
+    item.className = 'ma-sublist-item'
     const subtitle = mod.version ? `${mod.id} · ${mod.version}` : mod.id
-    card.innerHTML = `
-      <div class="action_card">
-        <div class="dimc content action_card_title">${mod.name}</div>
-        <div class="dimc desc action_card_description">${subtitle}</div>
-      </div>
-      <label class="switch dimc">
-        <input type="checkbox" data-ma-mod-id="${mod.id}">
-        <span class="slider"></span>
-      </label>
+    item.innerHTML = `
+      <input type="checkbox" class="ma-sublist-checkbox" data-ma-mod-id="${mod.id}">
+      <div class="ma-sublist-name">${mod.name}</div>
+      <div class="ma-sublist-meta">${subtitle}</div>
     `
-    const cb = card.querySelector('input[type="checkbox"]')
+    const cb = item.querySelector('input[type="checkbox"]')
     cb.checked = included
     cb.addEventListener('change', () => {
       const id = cb.getAttribute('data-ma-mod-id')
@@ -414,7 +408,7 @@ function _renderModuleList() {
       }
       _writeMetaCfg()
     })
-    listEl.appendChild(card)
+    listEl.appendChild(item)
   }
 }
 
@@ -443,20 +437,14 @@ function _renderPartitionList() {
 
   for (const part of MetaMountState.discoveredPartitions) {
     const mounted = !MetaMountState.excludedPartitions.includes(part)
-    const card = document.createElement('div')
-    card.className = 'small_card dimc'
-    card.style.marginBottom = '0'
-    card.innerHTML = `
-      <div class="action_card">
-        <div class="dimc content action_card_title">${part}</div>
-        <div class="dimc desc action_card_description">/${part}</div>
-      </div>
-      <label class="switch dimc">
-        <input type="checkbox" data-ma-part="${part}">
-        <span class="slider"></span>
-      </label>
+    const item = document.createElement('div')
+    item.className = 'ma-sublist-item'
+    item.innerHTML = `
+      <input type="checkbox" class="ma-sublist-checkbox" data-ma-part="${part}">
+      <div class="ma-sublist-name">${part}</div>
+      <div class="ma-sublist-meta">/${part}</div>
     `
-    const cb = card.querySelector('input[type="checkbox"]')
+    const cb = item.querySelector('input[type="checkbox"]')
     cb.checked = mounted
     cb.addEventListener('change', () => {
       const p = cb.getAttribute('data-ma-part')
@@ -471,7 +459,7 @@ function _renderPartitionList() {
       }
       _writeMetaCfg()
     })
-    listEl.appendChild(card)
+    listEl.appendChild(item)
   }
 }
 

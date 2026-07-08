@@ -98,6 +98,8 @@
       "notActive": "元模块未激活。在 KernelSU 或 APatch 上安装以启用。",
       "note": "更改将在下次重启后生效。默认不挂载任何模块——勾选要挂载的模块，它们的所有分区会自动挂载。",
       "settings": {
+        "sectionBasic": "基本设置",
+        "sectionHide": "隐藏与注销",
         "enabled": {
           "title": "启用元模块挂载",
           "description": "开关元模块挂载功能。关闭后 Hrezygisk 不挂载任何模块。"
