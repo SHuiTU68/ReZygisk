@@ -1,0 +1,22 @@
+load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+
+# INFO: Out-of-tree kernel module build via Kleaf (Bazel).
+#
+# This is the official Kleaf way to build an external .ko module against the
+# GKI kernel. It does NOT require modifying the kernel source tree:
+#   - No `obj-m += nuke_ext4_lkm/` in drivers/Makefile
+#   - No modules.bzl patch (which caused filegroup conflicts)
+#   - No Kconfig wiring
+#
+# The kernel_module() rule builds the kernel_aarch64 target (just enough for
+# module compilation: headers, Module.symvers, scripts), then compiles our
+# module out-of-tree using `make M=nuke_ext4_lkm`.
+#
+# Build:   tools/bazel build //nuke_ext4_lkm:nuke_ext4_lkm
+# Output:  bazel-bin/nuke_ext4_lkm/nuke.ko
+kernel_module(
+    name = "nuke_ext4_lkm",
+    srcs = glob(["**"]),
+    outs = ["nuke.ko"],
+    kernel_build = "//common:kernel_aarch64",
+)

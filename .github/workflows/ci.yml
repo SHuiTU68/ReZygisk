@@ -15,12 +15,14 @@ on:
         type: boolean
 
 jobs:
-  # INFO: Build nuke.ko from source against AOSP android15-6.6-lts GKI kernel.
+  # INFO: Build nuke.ko from source against AOSP android15-6.6 GKI kernel.
   # Runs on EVERY CI run by default (push, PR, manual) so the module zip always
   # contains a freshly-built ko. Pass skip_lkm=true on manual dispatch to skip
   # when you only touched module/webui code and want a fast run.
-  # Optimization: only build the kernel_aarch64_modules target (not the full
-  # kernel image), which skips vmlinux/boot.img and cuts build time ~40%.
+  # Approach: Kleaf's kernel_module() rule builds nuke.ko out-of-tree against
+  # //common:kernel_aarch64. This is the official Kleaf way — no kernel tree
+  # modification needed. Falls back to in-tree obj-m + full dist build if the
+  # kernel_module() rule is unavailable.
   build-lkm:
     name: Build nuke.ko
     runs-on: ubuntu-latest
@@ -102,99 +104,110 @@ jobs:
           echo "=== Verifying common/ exists ==="
           ls -la common/ 2>&1 | head -5 || { echo "ERROR: common/ dir missing"; exit 1; }
 
-      - name: Prepare GKI and inject nuke_ext4_lkm
+      # INFO: Place nuke_ext4_lkm as an out-of-tree module at the workspace
+      # root. The BUILD.bazel in this directory uses Kleaf's kernel_module()
+      # rule to build nuke.ko against the GKI kernel WITHOUT modifying the
+      # kernel source tree.
+      #
+      # This replaces the old approach of:
+      #   - Moving source into common/drivers/nuke_ext4_lkm/
+      #   - Patching drivers/Makefile (obj-m) and drivers/Kconfig
+      #   - Patching modules.bzl (caused filegroup conflicts in BUILD.bazel)
+      #
+      # The kernel_module() rule is the official Kleaf way to build external
+      # modules. It builds just enough of the kernel (headers, scripts,
+      # Module.symvers) then compiles our module with `make M=`.
+      - name: Place nuke_ext4_lkm as out-of-tree module
         working-directory: android-kernel
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang
+          mv ../nuke_ext4_lkm nuke_ext4_lkm
+          echo "=== nuke_ext4_lkm contents ==="
+          ls -la nuke_ext4_lkm/
+          echo "=== BUILD.bazel ==="
+          cat nuke_ext4_lkm/BUILD.bazel
 
-          cd common
-          # Inject our nuke_ext4_lkm source into the kernel tree.
-          mv ../../nuke_ext4_lkm drivers/nuke_ext4_lkm
-
-          # Wire it into Kconfig / Makefile.
-          # IMPORTANT: use obj-m (module), NOT obj-y (built-in). We need a
-          # loadable .ko, not a built-in driver.
-          sed -i 's/endmenu//g' drivers/Kconfig
-          echo 'source "drivers/nuke_ext4_lkm/Kconfig"' >> drivers/Kconfig
-          echo 'endmenu' >> drivers/Kconfig
-          echo 'obj-m += nuke_ext4_lkm/' >> drivers/Makefile
-
-          # Patch modules.bzl so bazel builds + ships nuke.ko.
-          # The module list variable name varies across kernel versions; try
-          # several known patterns. Also relax the "needs unknown symbol"
-          # check caused by MODULE_IMPORT_NS.
-          cd ..
-          sed -i 's/needs unknown symbol/Dont abort when unknown symbol/g' build/kernel/*.sh 2>/dev/null || true
-          if [ -e common/modules.bzl ]; then
-            echo "=== modules.bzl before patch ==="
-            grep -n "MODULES_LIST\|module_outs\|GKI_MODULES" common/modules.bzl | head -10
-            # Try several variable name patterns
-            sed -i 's/_COMMON_GKI_MODULES_LIST = \[/_COMMON_GKI_MODULES_LIST = \[ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl 2>/dev/null || true
-            sed -i 's/_GKI_MODULES_LIST = \[/_GKI_MODULES_LIST = \[ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl 2>/dev/null || true
-            sed -i 's/module_outs = \[/module_outs = [ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl 2>/dev/null || true
-            echo "=== modules.bzl after patch ==="
-            grep -n "nuke" common/modules.bzl | head -5
-          fi
-
-      # INFO: Build via Kleaf. We use `bazel build` (not `run`) + manually copy
-      # the dist outputs. Log to file so exit code is preserved.
+      # INFO: Build nuke.ko via Kleaf's kernel_module() rule.
+      # Target: //nuke_ext4_lkm:nuke_ext4_lkm
+      # Output: bazel-bin/nuke_ext4_lkm/nuke.ko
       #
-      # Key points:
-      # - `tools/bazel` is the Kleaf wrapper (symlink created by repo sync).
-      #   If missing, fall back to `build/kernel/kleaf/build.sh`.
-      # - `--config=fast` is the standard Kleaf fast config.
-      # - We query available targets first to diagnose "target not found".
+      # The rule depends on //common:kernel_aarch64 (the GKI kernel build),
+      # so Bazel will build the kernel first, then our module. This takes
+      # ~15-20 min on the first run but is the correct, non-hacky approach.
+      #
+      # Fallback: if kernel_module() is unavailable or the target fails, we
+      # fall back to the in-tree approach (move into common/drivers/, add
+      # obj-m, build //common:kernel_aarch64_dist).
       - name: Build nuke.ko via Kleaf
         working-directory: android-kernel
         run: |
           set -o pipefail
           mkdir -p dist
 
-          # Locate the bazel wrapper
-          BAZEL=""
-          if [ -x "tools/bazel" ]; then
-            BAZEL="tools/bazel"
-          elif [ -x "build/kernel/kleaf/build.sh" ]; then
-            BAZEL="build/kernel/kleaf/build.sh"
-          else
-            echo "=== ERROR: no bazel wrapper found ==="
-            echo "Looking for tools/bazel or build/kernel/kleaf/build.sh:"
-            ls -la tools/bazel 2>&1 || true
-            ls -la build/kernel/kleaf/ 2>&1 | head -10 || true
-            find . -maxdepth 3 -name "bazel" -o -name "build.sh" 2>/dev/null | head -10
-            exit 1
-          fi
+          BAZEL="tools/bazel"
+          [ -x "$BAZEL" ] || BAZEL="build/kernel/kleaf/build.sh"
+          [ -x "$BAZEL" ] || { echo "ERROR: no bazel wrapper found"; exit 1; }
           echo "=== Using bazel wrapper: $BAZEL ==="
 
-          echo "=== Available kernel_aarch64 targets in //common: ==="
-          "$BAZEL" query 'attr(name, "kernel_aarch64.*", //common:*)' 2>&1 | head -20 || true
+          # Debug: list available kernel_aarch64 targets in //common:
+          echo "=== kernel_aarch64 targets in //common: ==="
+          "$BAZEL" query 'attr(name, "kernel_aarch64", //common:*)' 2>&1 | sort -u || true
 
-          echo "=== Checking nuke_ext4_lkm registered in modules.bzl ==="
-          grep -rn "nuke" common/modules.bzl 2>/dev/null || echo "WARNING: nuke not in modules.bzl"
-
-          echo "=== Building //common:kernel_aarch64_dist (takes ~20min) ==="
-          "$BAZEL" build --config=fast --lto=thin //common:kernel_aarch64_dist 2>&1 | tee /tmp/bazel_build.log
+          # Primary: out-of-tree module build via kernel_module() rule.
+          echo "=== Building //nuke_ext4_lkm:nuke_ext4_lkm (out-of-tree) ==="
+          "$BAZEL" build --config=fast --lto=thin //nuke_ext4_lkm:nuke_ext4_lkm 2>&1 | tee /tmp/bazel_build.log
           BUILD_EXIT=${PIPESTATUS[0]}
           echo "=== bazel exit code: $BUILD_EXIT ==="
-          if [ "$BUILD_EXIT" != "0" ]; then
-            echo "=== BUILD FAILED. Last 100 lines of log: ==="
-            tail -100 /tmp/bazel_build.log
-            exit "$BUILD_EXIT"
-          fi
 
-          echo "=== Copying dist outputs ==="
-          "$BAZEL" run --config=fast --lto=thin //common:kernel_aarch64_dist -- --dist_dir=dist 2>&1 | tail -20 || true
-
-          echo "=== Looking for nuke.ko in dist/ ==="
-          find dist -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
-          if [ ! -f dist/nuke.ko ]; then
-            echo "=== nuke.ko not in dist/, searching bazel-bin/ ==="
+          if [ "$BUILD_EXIT" = "0" ]; then
+            echo "=== Out-of-tree build succeeded. Looking for nuke.ko ==="
             find bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
+          else
+            echo "=== Out-of-tree build failed (exit $BUILD_EXIT). Last 80 lines: ==="
+            tail -80 /tmp/bazel_build.log
+            echo ""
+            echo "=== Falling back to in-tree approach ==="
+
+            # Move module into the kernel tree and wire it via obj-m.
+            mv nuke_ext4_lkm common/drivers/nuke_ext4_lkm
+            sed -i 's/endmenu//g' common/drivers/Kconfig
+            echo 'source "drivers/nuke_ext4_lkm/Kconfig"' >> common/drivers/Kconfig
+            echo 'endmenu' >> common/drivers/Kconfig
+            echo 'obj-m += nuke_ext4_lkm/' >> common/drivers/Makefile
+            # Relax unknown-symbol abort (kallsyms_lookup_name via kprobe).
+            sed -i 's/needs unknown symbol/Dont abort when unknown symbol/g' build/kernel/*.sh 2>/dev/null || true
+
+            # Try the full kernel dist build (no modules.bzl patch — that
+            # caused filegroup conflicts).
+            TARGET=""
+            for t in kernel_aarch64_dist kernel_aarch64; do
+              if "$BAZEL" query "//common:$t" >/dev/null 2>&1; then
+                TARGET="//common:$t"
+                break
+              fi
+            done
+            if [ -z "$TARGET" ]; then
+              echo "=== ERROR: no kernel_aarch64 build target found ==="
+              exit 1
+            fi
+            echo "=== Fallback: building $TARGET ==="
+            "$BAZEL" build --config=fast --lto=thin "$TARGET" 2>&1 | tee /tmp/bazel_build2.log
+            BUILD_EXIT=${PIPESTATUS[0]}
+            echo "=== fallback bazel exit code: $BUILD_EXIT ==="
+            if [ "$BUILD_EXIT" != "0" ]; then
+              echo "=== FALLBACK BUILD FAILED. Last 100 lines: ==="
+              tail -100 /tmp/bazel_build2.log
+              exit "$BUILD_EXIT"
+            fi
+            # For _dist targets, run to copy outputs.
+            if [[ "$TARGET" == *"dist"* ]]; then
+              "$BAZEL" run --config=fast --lto=thin "$TARGET" -- --dist_dir=dist 2>&1 | tail -20 || true
+            fi
+            find dist bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
           fi
+
           test -f dist/nuke.ko || { echo "ERROR: nuke.ko not found anywhere"; exit 1; }
+          echo "=== nuke.ko found ==="
+          ls -la dist/nuke.ko
 
       - name: Verify nuke.ko
         run: |
