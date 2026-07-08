@@ -75,6 +75,10 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	      module/src/metamount.sh module/src/metainstall.sh module/src/metauninstall.sh \
 	      module/src/config.sh module/src/modules.txt $(MODULE_OUT)/
 
+	@echo "Copying LKM (nuke.ko for ext4 sysfs)..."
+	@mkdir -p $(MODULE_OUT)/lkm
+	@cp module/src/lkm/nuke.ko $(MODULE_OUT)/lkm/
+
 	@echo "Customizing module.prop..."
 	@sed -e 's/$${moduleId}/$(MODULE_ID)/g'                                             \
 	    -e 's/$${moduleName}/$(MODULE_NAME)/g'                                          \

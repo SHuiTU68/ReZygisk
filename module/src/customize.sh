@@ -330,6 +330,13 @@ extract "$ZIPFILE" 'config.sh'        "$MODPATH"
 extract "$ZIPFILE" 'modules.txt'      "$MODPATH"
 extract "$ZIPFILE" 'rezygisk.sh' "/data/adb/post-fs-data.d/"
 
+# INFO: Extract the nuke.ko LKM (ext4 sysfs unregister, kernel 6.6 / Android 15).
+# metamount.sh loads $MODDIR/lkm/$lkm_filename when enable_lkm_nuke=1 and
+# use_ext4_sparse=1 (ext4 mode). Default config keeps it disabled, so this
+# is a no-op unless the user opts in via config.sh.
+mkdir -p "$MODPATH/lkm"
+extract "$ZIPFILE" 'lkm/nuke.ko' "$MODPATH/lkm" true
+
 # INFO: Metamodule hooks must be executable so KernelSU/APatch can invoke them.
 chmod +x "$MODPATH/metamount.sh" "$MODPATH/metainstall.sh" "$MODPATH/metauninstall.sh"
 
