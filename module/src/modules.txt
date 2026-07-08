@@ -1,0 +1,4 @@
+# modules.txt — manual mode module list
+# List one module ID per line. Lines starting with # are ignored.
+# Only used when mountify_mounts=1 (manual mode) in config.sh.
+# In auto mode (mountify_mounts=2), all modules with system/ dirs are mounted.

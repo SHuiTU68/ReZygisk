@@ -326,10 +326,19 @@ extract "$ZIPFILE" 'uninstall.sh'    "$MODPATH"
 extract "$ZIPFILE" 'metamount.sh'     "$MODPATH"
 extract "$ZIPFILE" 'metainstall.sh'   "$MODPATH"
 extract "$ZIPFILE" 'metauninstall.sh' "$MODPATH"
+extract "$ZIPFILE" 'config.sh'        "$MODPATH"
+extract "$ZIPFILE" 'modules.txt'      "$MODPATH"
 extract "$ZIPFILE" 'rezygisk.sh' "/data/adb/post-fs-data.d/"
 
 # INFO: Metamodule hooks must be executable so KernelSU/APatch can invoke them.
 chmod +x "$MODPATH/metamount.sh" "$MODPATH/metainstall.sh" "$MODPATH/metauninstall.sh"
+
+# INFO: Copy mountify-style config files to persistent dir so they survive
+# module updates. metamount.sh sources $PERSISTENT_DIR/config.sh on every boot.
+META_PERSISTENT_DIR="/data/adb/rezygisk_meta"
+mkdir -p "$META_PERSISTENT_DIR"
+[ -f "$META_PERSISTENT_DIR/config.sh" ] || cp "$MODPATH/config.sh" "$META_PERSISTENT_DIR/config.sh"
+[ -f "$META_PERSISTENT_DIR/modules.txt" ] || cp "$MODPATH/modules.txt" "$META_PERSISTENT_DIR/modules.txt"
 
 # INFO: KernelSU 2.x.x and below runs post-fs-data.d before mounting
 #         the modules. This disallows us to clean our own module.prop.

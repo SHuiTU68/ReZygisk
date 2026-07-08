@@ -1,399 +1,435 @@
-#!/system/bin/sh
-
-# Hrezygisk metamodule mount handler.
-#
-# This script is based on mountify's proven staging + per-directory overlay
-# mechanism (https://github.com/backslashxx/mountify). The key insight from
-# mountify is: instead of overlaying entire partitions (which fails when the
-# partition is already overlaid by KSU), we:
-#   1. Create a tmpfs (or ext4) staging area at /mnt/vendor/<name>
-#   2. Copy each whitelisted module's system/ contents into the staging area
-#   3. For EACH subdirectory (system/bin, system/etc, vendor/lib, ...), do a
-#      separate overlay: lowerdir=staging/dir:/real/dir
-#   4. Unmount the staging area (the per-dir overlays persist)
-#
-# This avoids stacking overlay-on-overlay on entire partitions and works
-# reliably across all KSU forks and APatch.
-#
-# CONFIG: /data/adb/.rz_meta_cfg (enabled, mount_mode, fake_mount_name,
-#         include_modules, exclude_partitions)
-# STATUS: /data/adb/.rz_meta_status (effective_mode, mounted_partitions)
-
-MODDIR=${0%/*}
-
-# INFO: All metamount data lives OUTSIDE /data/adb/rezygisk/ (which gets
-# rm -rf'd + chmod 555 by post-fs-data.sh every boot).
-LOGFILE=/data/adb/.rz_meta.log
-CFG=/data/adb/.rz_meta_cfg
-STATUS=/data/adb/.rz_meta_status
-
-_meta_log() {
-  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOGFILE" 2>/dev/null
-}
-
-_write_status() {
-  cat > "$STATUS" <<RASTATS
-configured_mode=${CONFIG_MODE:-${MOUNT_MODE:-auto}}
-effective_mode=${1:-$MOUNT_MODE}
-source=${SOURCE:-unknown}
-mount_mode_stage=${STAGE:-}
-mounted_partitions=${MOUNTED_PARTITIONS:-}
-mounted_dirs=${MOUNTED_DIRS:-}
-RASTATS
-}
-
-_meta_log "=== metamount.sh invoked (pid=$$) ==="
-
-# INFO: Ensure PATH includes root impl bin dirs so busybox is findable.
+#!/bin/sh
+# metamount.sh
+# Ported from mountify (https://github.com/backslashxx/mountify)
+# No warranty. No rights reserved. The Unlicense.
 PATH=/data/adb/ap/bin:/data/adb/apd/bin:/data/adb/ksu/bin:/data/adb/ksud/bin:/data/adb/magisk:$PATH
-export PATH
-
-# INFO: Detect root implementation (KSU all forks + APatch).
-_detect_root_impl() {
-  if [ "$(which magisk)" ]; then
-    _meta_log "root impl: Magisk (metamodule not supported)"
-    return 1
-  fi
-  if [ "$APATCH" = "true" ] || [ -d /data/adb/ap ] || [ -d /data/adb/apd ]; then
-    SOURCE=APatch
-    _meta_log "root impl: APatch"
-    return 0
-  fi
-  if [ "$KSU" = "true" ] || [ -d /data/adb/ksu ] || [ -d /data/adb/ksud ]; then
-    SOURCE=KSU
-    _meta_log "root impl: KSU"
-    return 0
-  fi
-  _meta_log "root impl: none detected (KSU=$KSU APATCH=$APATCH)"
-  return 1
-}
-
-SOURCE=""
-if ! _detect_root_impl; then
-  _write_status "no_root_impl"
-  exit 0
+# variables
+MODDIR="/data/adb/modules/rezygisk"
+# config
+mountify_mounts=2
+FAKE_MOUNT_NAME="rezygisk"
+MOUNT_DEVICE_NAME="overlay"
+FS_TYPE_ALIAS="overlay"
+use_ext4_sparse=0
+spoof_sparse=0
+FAKE_APEX_NAME="com.android.mntservice"
+sparse_size="2048"
+test_decoy_mount=0
+DECOY_MOUNT_FOLDER="/oem"
+mountify_expert_mode=0
+enable_lkm_nuke=0
+lkm_filename="nuke.ko"
+# read config
+PERSISTENT_DIR="/data/adb/rezygisk_meta"
+. $PERSISTENT_DIR/config.sh
+# exit if disabled
+if [ $mountify_mounts = 0 ]; then
+        string="description=mode: disabled"
+        sed -i "s/^description=.*/$string/g" "$MODDIR/module.prop"
+        exit 0
 fi
 
-# INFO: Boot-id sentinel to prevent double-execution.
-RZ_BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
-RZ_SENTINEL=/data/adb/.rz_meta_boot_sentinel
-if [ -n "$RZ_BOOT_ID" ] && [ -f "$RZ_SENTINEL" ] \
-   && [ "$(cat "$RZ_SENTINEL" 2>/dev/null)" = "$RZ_BOOT_ID" ]; then
-  _meta_log "metamount already ran this boot (boot_id=$RZ_BOOT_ID), skipping"
-  exit 0
+# set prefix
+DMESG_PREFIX="rezygisk/post-fs-data"
+if [ -f "$MODDIR/metamount.sh" ]; then
+        DMESG_PREFIX="rezygisk/metamount"
 fi
 
-# INFO: Read user configuration. DEFAULT: enabled=false for safety.
-ENABLED=false
-MOUNT_MODE=auto
-FAKE_MOUNT_NAME=rezygisk
-INCLUDE_MODULES=""
-if [ -f "$CFG" ]; then
-  # shellcheck disable=SC1090
-  . "$CFG"
+# single instance run
+MOUNTIFY_LOCK="/dev/rezygisk_single_instance"
+if [ -f "$MOUNTIFY_LOCK" ]; then
+        echo "$DMESG_PREFIX: metamount already ran!" >> /dev/kmsg
+        exit 1
 fi
-CONFIG_MODE="$MOUNT_MODE"
+touch "$MOUNTIFY_LOCK"
 
-if [ "$ENABLED" != "true" ]; then
-  _meta_log "metamount disabled by config (enabled=$ENABLED), exiting"
-  _write_status "disabled"
-  exit 0
-fi
+# add simple anti bootloop logic
+BOOTCOUNT=0
+[ -f "$MODDIR/count.sh" ] && . "$MODDIR/count.sh"
 
-_meta_log "metamount start: SOURCE=$SOURCE mode=$MOUNT_MODE fake_name=$FAKE_MOUNT_NAME include=[$INCLUDE_MODULES]"
+BOOTCOUNT=$(( BOOTCOUNT + 1))
 
-# SAFETY: Sanitize FAKE_MOUNT_NAME — only allow alphanumerics + underscore.
-case "$FAKE_MOUNT_NAME" in
-  *[!A-Za-z0-9_]*) FAKE_MOUNT_NAME=rezygisk;;
-esac
-[ -z "$FAKE_MOUNT_NAME" ] && FAKE_MOUNT_NAME=rezygisk
-
-# INFO: Read exclude_partitions blacklist (partitions user unchecked in WebUI).
-EXCLUDE_PARTITIONS=""
-if [ -f "$CFG" ]; then
-  _ep=$(grep '^exclude_partitions=' "$CFG" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr ',' ' ')
-  [ -n "$_ep" ] && EXCLUDE_PARTITIONS="$_ep"
-fi
-[ -n "$EXCLUDE_PARTITIONS" ] && _meta_log "exclude_partitions=[$EXCLUDE_PARTITIONS]"
-
-_is_partition_excluded() {
-  case " $EXCLUDE_PARTITIONS " in
-    *" $1 "*) return 0;;
-    *) return 1;;
-  esac
-}
-
-# INFO: Whitelist check — only mount modules explicitly in include_modules.
-_should_mount_module() {
-  mod="$1"
-  [ -d "$mod" ] || return 1
-  [ -d "$mod/system" ] || return 1
-  [ -f "$mod/disable" ] && return 1
-  [ -f "$mod/skip_mount" ] && return 1
-  [ -f "$mod/remove" ] && return 1
-  modid=$(basename "$mod")
-  case " $INCLUDE_MODULES " in
-    *" $modid "*) return 0;;
-  esac
-  return 1
-}
-
-# INFO: Partitions to scan for (top-level dirs under system/). Matches mountify.
-# These are the common Android partitions that modules may modify.
-TARGET_PARTITIONS="system vendor product system_ext odm oem mi_ext my_bigball my_carrier my_company my_engineering my_heytap my_manifest my_preload my_product my_region my_reserve my_stock optics prism"
-
-# INFO: Determine staging folder. Prefer /mnt/vendor (writable, not mounted),
-# fall back to /mnt.
-MNT_FOLDER=""
-if [ -w "/mnt/vendor" ] && ! grep -q " /mnt/vendor " /proc/mounts 2>/dev/null; then
-  MNT_FOLDER="/mnt/vendor"
-elif [ -w "/mnt" ]; then
-  MNT_FOLDER="/mnt"
-fi
-
-if [ -z "$MNT_FOLDER" ]; then
-  _meta_log "FAIL: no writable staging folder (/mnt or /mnt/vendor)"
-  _write_status "no_staging_folder"
-  exit 0
-fi
-
-STAGE="$MNT_FOLDER/$FAKE_MOUNT_NAME"
-
-# INFO: Stage 1 — mount tmpfs on MNT_FOLDER itself (so all staging is volatile).
-# This mirrors mountify's two-stage approach.
-_meta_log "stage1: mounting tmpfs on $MNT_FOLDER"
-if ! mount -t tmpfs tmpfs "$MNT_FOLDER" 2>/dev/null; then
-  _meta_log "FAIL: cannot mount tmpfs on $MNT_FOLDER"
-  _write_status "stage1_fail"
-  exit 0
-fi
-
-# INFO: Stage 2 — mount tmpfs (or ext4) on the staging subfolder.
-mkdir -p "$STAGE"
-
-# INFO: Try ext4 mode if requested or as auto fallback for large module sets.
-# For now, use tmpfs (simplest, works everywhere). ext4 can be added later.
-_meta_log "stage2: mounting tmpfs on $STAGE"
-if ! mount -t tmpfs tmpfs "$STAGE" 2>/dev/null; then
-  _meta_log "FAIL: cannot mount tmpfs on $STAGE"
-  _write_status "stage2_fail"
-  exit 0
-fi
-
-if [ "$MOUNT_MODE" = "auto" ] || [ "$MOUNT_MODE" = "tmpfs" ]; then
-  EFFECTIVE_MODE=tmpfs
-elif [ "$MOUNT_MODE" = "ext4" ] || [ "$MOUNT_MODE" = "direct" ]; then
-  # INFO: For ext4/direct, still use tmpfs staging (the mount mechanism is the
-  # same; ext4 would back the staging with a loop image for persistence, but
-  # since module data is recreatable each boot, tmpfs is fine and faster).
-  EFFECTIVE_MODE=tmpfs
+if [ ! -f "$PERSISTENT_DIR/explicit_I_want_a_bootloop" ] && [ $BOOTCOUNT -gt 2 ]; then
+        touch $MODDIR/disable
+        rm "$MODDIR/count.sh"
+        string="description=anti-bootloop triggered. module disabled."
+        sed -i "s/^description=.*/$string/g" $MODDIR/module.prop
+        exit 1
 else
-  EFFECTIVE_MODE=tmpfs
-fi
-MOUNT_MODE=$EFFECTIVE_MODE
-_meta_log "effective mode: $EFFECTIVE_MODE (stage=$STAGE)"
-
-# Write status now so WebUI shows effective mode even if mounts partially fail.
-MOUNTED_PARTITIONS=""
-MOUNTED_DIRS=""
-_write_status "$EFFECTIVE_MODE"
-
-# INFO: Copy each whitelisted module's system/ contents into staging area.
-# Module structure: module/system/bin/..., module/system/etc/...
-# Staging structure: staging/bin/..., staging/etc/...
-# Later, staging/bin overlays onto /system/bin, staging/vendor onto /vendor, etc.
-#
-# "system" subdir of module/system/ maps to /system itself.
-# Other subdirs (vendor, product, ...) map to /<subdir>.
-_modules_copied=0
-for mod in /data/adb/modules/*; do
-  _should_mount_module "$mod" || continue
-  modid=$(basename "$mod")
-  _meta_log "copying module: $modid"
-
-  # Copy each partition this module provides
-  for entry in "$mod"/system/*; do
-    [ -e "$entry" ] || continue
-    pname=$(basename "$entry")
-    # SAFETY: partition name must be a simple identifier
-    case "$pname" in
-      ""|*..*|*/*) continue;;
-    esac
-
-    # Skip excluded partitions
-    if _is_partition_excluded "$pname"; then
-      _meta_log "  skip $pname (excluded)"
-      continue
-    fi
-
-    # Copy module's system/$pname into staging/$pname
-    mkdir -p "$STAGE/$pname" 2>/dev/null
-    if cp -af "$entry/." "$STAGE/$pname/" 2>/dev/null; then
-      _meta_log "  copied $pname"
-      _modules_copied=$((_modules_copied + 1))
-    else
-      _meta_log "  WARN: cp failed for $pname"
-    fi
-  done
-done
-
-if [ "$_modules_copied" -eq 0 ]; then
-  _meta_log "no module files copied (no whitelisted modules or all excluded)"
-  _write_status "$EFFECTIVE_MODE"
-  [ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
-  # Unmount staging since nothing to mount
-  umount -l "$STAGE" 2>/dev/null
-  umount -l "$MNT_FOLDER" 2>/dev/null
-  exit 0
+        echo "BOOTCOUNT=$BOOTCOUNT" > "$MODDIR/count.sh"
 fi
 
-# INFO: Mirror SELinux context from real files to staged files. This is critical
-# — without it, overlay shows "u:object_r:tmpfs:s0" and processes get denied.
-#
-# Mapping: staging/$pname/$file → /$real_partition/$pname/$file
-#   - If pname == "system": real_partition is /system (staging/system/bin → /system/bin)
-#   - Else: real_partition is /$pname (staging/vendor/lib → /vendor/lib)
-_meta_log "restoring SELinux contexts on staging"
-for staging_part in "$STAGE"/*; do
-  [ -e "$staging_part" ] || continue
-  part=$(basename "$staging_part")
+# grab start time
+echo "$DMESG_PREFIX: start!" >> /dev/kmsg
 
-  # Determine the real base path for this staging partition
-  case "$part" in
-    system) real_base="/system" ;;
-    *)      real_base="/$part" ;;
-  esac
-  [ -d "$real_base" ] || continue
+# find MNT_FOLDER
+[ -w "/mnt" ] && MNT_FOLDER="/mnt"
+[ -w "/mnt/vendor" ] && ! busybox grep -q " /mnt/vendor " "/proc/mounts" && MNT_FOLDER="/mnt/vendor"
 
-  # chcon each file to match the corresponding real file
-  find "$staging_part" -type f 2>/dev/null | while read -r f; do
-    rel="${f#$STAGE/$part/}"
-    realfile="$real_base/$rel"
-    if [ -e "$realfile" ]; then
-      chcon --reference="$realfile" "$f" 2>/dev/null
-    else
-      # New file from module — use parent dir's context
-      parentdir=$(dirname "$realfile")
-      [ -d "$parentdir" ] && chcon --reference="$parentdir" "$f" 2>/dev/null
-    fi
-  done
-  # chcon directories too
-  find "$staging_part" -type d 2>/dev/null | while read -r d; do
-    rel="${d#$STAGE/$part/}"
-    realdir="$real_base/$rel"
-    if [ -d "$realdir" ]; then
-      chcon --reference="$realdir" "$d" 2>/dev/null
-    fi
-  done
-done
+# create logging folder
+LOG_FOLDER="/dev/rezygisk_logs"
+mkdir -p "$LOG_FOLDER"
+# log before
+cat /proc/mounts > "$LOG_FOLDER/before"
 
-# INFO: Handle opaque directories (trusted.overlay.opaque xattr). If a module
-# marks a dir as opaque, the overlay should hide the lower real dir entirely.
-_meta_log "checking opaque dirs"
-for staging_part in "$STAGE"/*; do
-  [ -e "$staging_part" ] || continue
-  find "$staging_part" -type d 2>/dev/null | while read -r d; do
-    if getfattr -d "$d" 2>/dev/null | grep -q "trusted.overlay.opaque"; then
-      setfattr -n trusted.overlay.opaque -v y "$d" 2>/dev/null
-      _meta_log "  set opaque: $d"
-    fi
-  done
-done
+# module mount section
+IFS="
+"
+targets="odm
+product
+system_ext
+vendor
+apex
+mi_ext
+my_bigball
+my_carrier
+my_company
+my_engineering
+my_heytap
+my_manifest
+my_preload
+my_product
+my_region
+my_reserve
+my_stock
+oem
+optics
+prism"
 
-# INFO: Now do per-directory overlay mounts. For each subdirectory in staging,
-# overlay it onto the corresponding real directory. This is mountify's core
-# mechanism: lowerdir=staging/subdir:/real/subdir
-#
-# Mapping:
-#   staging/system/bin  → overlay onto /system/bin
-#   staging/system/etc  → overlay onto /system/etc
-#   staging/vendor/lib  → overlay onto /vendor/lib
-#   staging/product/app → overlay onto /product/app
-_meta_log "starting per-directory overlay mounts"
+decoy_folder_candidates="/oem
+/second_stage_resources
+/patch_hw
+/postinstall
+/system_dlkm
+/oem_dlkm
+/acct
+"
 
-# Function: overlay each subdir of $staging_base onto $real_base
-_overlay_subdirs() {
-  _staging_base="$1"
-  _real_base="$2"
+# check if fake alias exists, if fail use overlay
+if ! grep "nodev" /proc/filesystems | grep -q "$FS_TYPE_ALIAS" > /dev/null 2>&1; then
+        FS_TYPE_ALIAS="overlay"
+fi
 
-  [ -d "$_staging_base" ] || return 0
-  [ -d "$_real_base" ] || return 0
+if [ "$test_decoy_mount" = "1" ] && [ ! -f "$MODDIR/no_tmpfs_xattr" ]; then
+        # test for decoy mount
+        # it needs to be a blank folder
+        for dir in $decoy_folder_candidates; do
+                if [ -d "$dir" ] && [ "$(ls -A "$dir" 2>/dev/null | wc -l)" -eq 0 ]; then
+                        DECOY_MOUNT_FOLDER="$dir"
+                        echo "$DMESG_PREFIX: decoy folder $DECOY_MOUNT_FOLDER" >> /dev/kmsg
+                        decoy_mount_enabled="1"
+                        break
+                fi
+        done
+fi
 
-  cd "$_staging_base" || return 0
-  for dir in */; do
-    [ -d "$dir" ] || continue
-    dir="${dir%/}"
-    [ -n "$dir" ] || continue
+# functions
 
-    target="$_real_base/$dir"
-    lower="$_staging_base/$dir"
-
-    # Skip if target doesn't exist (can't overlay non-existent dir)
-    if [ ! -d "$target" ]; then
-      _meta_log "  skip $target (not a dir)"
-      continue
-    fi
-
-    # Skip if target is a symlink (e.g. /vendor -> /system/vendor)
-    if [ -L "$target" ]; then
-      _meta_log "  skip $target (symlink)"
-      continue
-    fi
-
-    # INFO: mount overlay. lowerdir = staging dir : real dir.
-    # source = "KSU" or "APatch" for denylist umount identification.
-    # No upperdir/workdir = read-only overlay (sufficient for module files).
-    if mount -t overlay -o "lowerdir=${lower}:${target}" "$SOURCE" "$target" 2>/dev/null; then
-      _meta_log "  mounted overlay on $target (lower=$lower:$target)"
-      MOUNTED_DIRS="$MOUNTED_DIRS $target"
-    else
-      _meta_log "  FAIL $target: mount overlay returned $?"
-    fi
-  done
-  cd "$MODDIR" 2>/dev/null
+# controlled depth ($targets fuckery)
+controlled_depth() {
+        if [ -z "$1" ] || [ -z "$2" ]; then return ; fi
+        mount_success=0
+        for DIR in $(ls -d $1/*/ | sed 's/.$//' ); do
+                if [ "$decoy_mount_enabled" = "1" ] && [ -w "$DECOY_MOUNT_FOLDER" ]; then
+                        mkdir -p "$DECOY_MOUNT_FOLDER/$2$DIR"
+                        busybox mount -t "$FS_TYPE_ALIAS" -o "lowerdir=$DECOY_MOUNT_FOLDER$2$DIR:$(pwd)/$DIR:$2$DIR" "$MOUNT_DEVICE_NAME" "$2$DIR" && mount_success=1
+                else
+                        busybox mount -t "$FS_TYPE_ALIAS" -o "lowerdir=$(pwd)/$DIR:$2$DIR" "$MOUNT_DEVICE_NAME" "$2$DIR" && mount_success=1
+                fi
+                [ "$mount_success" = 1 ] && echo "$2$DIR" >> "$LOG_FOLDER/mountify_mount_list"
+        done
 }
 
-# Process each partition present in staging
-for staging_part in "$STAGE"/*; do
-  [ -d "$staging_part" ] || continue
-  part=$(basename "$staging_part")
+# handle single depth (/system/bin, /system/etc, et. al)
+single_depth() {
+        mount_success=0
+        for DIR in $( ls -d */ | sed 's/.$//'  | grep -vE "^(odm|product|system_ext|vendor)$" 2>/dev/null ); do
+                if [ "$decoy_mount_enabled" = "1" ] && [ -w "$DECOY_MOUNT_FOLDER" ]; then
+                        mkdir -p "$DECOY_MOUNT_FOLDER/system/$DIR"
+                        busybox mount -t "$FS_TYPE_ALIAS" -o "lowerdir=$DECOY_MOUNT_FOLDER/system/$DIR:$(pwd)/$DIR:/system/$DIR" "$MOUNT_DEVICE_NAME" "/system/$DIR" && mount_success=1
+                else
+                        busybox mount -t "$FS_TYPE_ALIAS" -o "lowerdir=$(pwd)/$DIR:/system/$DIR" "$MOUNT_DEVICE_NAME" "/system/$DIR" && mount_success=1
+                fi
+                [ "$mount_success" = 1 ] && echo "/system/$DIR" >> "$LOG_FOLDER/mountify_mount_list"
+        done
+}
 
-  # Determine real base path
-  case "$part" in
-    system) real_part="/system" ;;
-    *)      real_part="/$part" ;;
-  esac
+# handle getfattr, it is sometimes not symlinked on /system/bin yet toybox has it
+if /system/bin/getfattr -d /system/bin > /dev/null 2>&1; then
+        getfattr() { /system/bin/getfattr "$@"; }
+else
+        getfattr() { /system/bin/toybox getfattr "$@"; }
+fi
 
-  _meta_log "processing partition: $part (real=$real_part)"
+mountify_copy() {
+        # return for missing args
+        if [ -z "$1" ]; then
+                echo "$DMESG_PREFIX: missing arguments" >> /dev/kmsg
+                return
+        fi
 
-  # Skip if real partition doesn't exist
-  if [ ! -d "$real_part" ]; then
-    _meta_log "  skip $part: $real_part not found"
-    continue
-  fi
+        MODULE_ID="$1"
 
-  # Skip symlinks (e.g. /vendor -> /system/vendor)
-  if [ -L "$real_part" ]; then
-    _meta_log "  skip $part: $real_part is symlink"
-    continue
-  fi
+        # return for certain modules
+        if [ "$MODULE_ID" = "De-bloater" ]; then
+                echo "$DMESG_PREFIX: module with name $MODULE_ID is blacklisted" >> /dev/kmsg
+                return
+        fi
 
-  # Overlay subdirs of this partition
-  _overlay_subdirs "$staging_part" "$real_part"
-  MOUNTED_PARTITIONS="$MOUNTED_PARTITIONS $part"
+        # test for various stuff
+        TARGET_DIR="/data/adb/modules/$MODULE_ID"
+        if [ ! -d "$TARGET_DIR/system" ] || [ -f "$TARGET_DIR/disable" ] || [ -f "$TARGET_DIR/remove" ] ||
+                [ -f "$TARGET_DIR/skip_mountify" ] || [ -f "$TARGET_DIR/system/etc/hosts" ]; then
+                echo "$DMESG_PREFIX: module with name $MODULE_ID not meant to be mounted" >> /dev/kmsg
+                return
+        fi
+
+        # on metamodule mode, we can actually respect skip_mount
+        if [ -f "$MODDIR/metamount.sh" ] && [ -f "$TARGET_DIR/skip_mount" ]; then
+                echo "$DMESG_PREFIX: module with name $MODULE_ID has skip_mount" >> /dev/kmsg
+                return
+        fi
+
+        echo "$DMESG_PREFIX: processing $MODULE_ID" >> /dev/kmsg
+
+        # skip_mount is also not needed for litemode APatch
+        if { [ "$APATCH_BIND_MOUNT" = "true" ] && [ -f /data/adb/.litemode_enable ]; } ||
+                [ -f "$MODDIR/metamount.sh" ]; then
+                [ -f "$TARGET_DIR/skip_mount" ] && rm "$TARGET_DIR/skip_mount"
+                [ -f "$PERSISTENT_DIR/skipped_modules" ] && rm "$PERSISTENT_DIR/skipped_modules"
+        else
+                if [ ! -f "$TARGET_DIR/skip_mount" ]; then
+                        touch "$TARGET_DIR/skip_mount"
+                        echo "$MODULE_ID" >> $PERSISTENT_DIR/skipped_modules
+                fi
+        fi
+
+        # we can copy over contents of system folder only
+        BASE_DIR="/data/adb/modules/$MODULE_ID/system"
+
+        # copy over our files, archive
+        cd "$MNT_FOLDER" && cp -af "$BASE_DIR"/* "$FAKE_MOUNT_NAME"
+
+        # go inside
+        cd "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+
+        # make sure to mirror selinux context
+        for file in $( busybox find -L $BASE_DIR | sed "s|$BASE_DIR||g" ) ; do
+                busybox chcon --reference="$BASE_DIR$file" "$MNT_FOLDER/$FAKE_MOUNT_NAME$file"
+        done
+
+        # catch opaque dirs, requires getfattr
+        for dir in $( busybox find -L $BASE_DIR -type d ) ; do
+                if getfattr -d "$dir" | grep -q "trusted.overlay.opaque" ; then
+                        opaque_dir=$(echo "$dir" | sed "s|$BASE_DIR|.|")
+                        busybox setfattr -n trusted.overlay.opaque -v y "$opaque_dir"
+                fi
+        done
+
+        # if it reached here, module probably copied, log it
+        echo "$MODULE_ID" >> "$LOG_FOLDER/modules"
+}
+
+# prevent this fuckup since on expert mode this isnt checked
+if [ "$FAKE_MOUNT_NAME" = "persist" ]; then
+        echo "$DMESG_PREFIX: folder name named $FAKE_MOUNT_NAME is not allowed!" >> /dev/kmsg
+        exit 1
+fi
+
+# make sure its not there
+if [ ! "$mountify_expert_mode" = 1 ] && [ -d "$MNT_FOLDER/$FAKE_MOUNT_NAME" ]; then
+        echo "$DMESG_PREFIX: exiting since fake folder name $FAKE_MOUNT_NAME already exists!" >> /dev/kmsg
+        exit 1
+fi
+
+# lets also mount our own /mnt folder
+# so hierarchy becomes
+# stage1 /mnt or /mnt/vendor always tmpfs
+# stage2 /mnt/fake_folder_name or /mnt/vendor/fake_folder_name is either tmpfs or ext4
+if [ -d "$MNT_FOLDER" ]; then
+        echo "$DMESG_PREFIX: stage1: mounting $(realpath "$MNT_FOLDER")" >> /dev/kmsg
+
+        # mount and test, if it fails fuck it, we bail
+        if ! busybox mount -t tmpfs tmpfs "$(realpath "$MNT_FOLDER")"; then
+                echo "$DMESG_PREFIX: mounting $MNT_FOLDER fail! bail out!" >> /dev/kmsg
+                exit 1
+        fi
+
+fi
+
+# create it
+mkdir -p "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+if [ ! -f "$MODDIR/no_tmpfs_xattr" ] && [ ! "$use_ext4_sparse" = "1" ]; then
+        echo "$DMESG_PREFIX: stage2/tmpfs: mounting $(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")" >> /dev/kmsg
+        busybox mount -t tmpfs tmpfs "$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+fi
+touch "$MNT_FOLDER/$FAKE_MOUNT_NAME/placeholder"
+
+# then make sure its there
+if [ ! -d "$MNT_FOLDER/$FAKE_MOUNT_NAME" ]; then
+        echo "$DMESG_PREFIX: failed creating folder with fake_folder_name $FAKE_MOUNT_NAME !" >> /dev/kmsg
+        exit 1
+fi
+
+if [ "$decoy_mount_enabled" = "1" ] && [ -d "$DECOY_MOUNT_FOLDER" ] && [ "$(ls -A "$DECOY_MOUNT_FOLDER" 2>/dev/null | wc -l)" -eq 0 ]; then
+        echo "$DMESG_PREFIX: mounting $DECOY_MOUNT_FOLDER" >> /dev/kmsg
+        mount -t tmpfs tmpfs "$DECOY_MOUNT_FOLDER"
+fi
+
+if [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; then
+        # create sparse ext4 image
+        busybox dd if=/dev/zero of="$MNT_FOLDER/rezygisk-ext4" bs=1M count=0 seek="$sparse_size"
+        /system/bin/mkfs.ext4 -O ^has_journal "$MNT_FOLDER/rezygisk-ext4"
+
+        [ "$KSU" = "true" ] && busybox chcon "u:object_r:ksu_file:s0" "$MNT_FOLDER/rezygisk-ext4"
+
+        echo "$DMESG_PREFIX: stage2/ext4: mounting $(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")" >> /dev/kmsg
+        busybox mount -o loop,rw,noatime,nodiratime "$MNT_FOLDER/rezygisk-ext4" "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+fi
+
+# if manual mode and modules.txt has contents
+if [ $mountify_mounts = 1 ] && grep -qv "#" "$PERSISTENT_DIR/modules.txt" >/dev/null 2>&1 ; then
+        # manual mode
+        for line in $( sed '/#/d' "$PERSISTENT_DIR/modules.txt" ); do
+                module_id=$( echo $line | awk {'print $1'} )
+                mountify_copy "$module_id"
+        done
+else
+        # auto mode — mount all modules that have system/ dirs
+        for module in /data/adb/modules/*/system; do
+                module_id="$(echo $module | cut -d / -f 5 )"
+                mountify_copy "$module_id"
+        done
+fi
+
+if [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; then
+        # unmount and remount ext4 image as ro
+        busybox umount -l "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+
+        echo "$DMESG_PREFIX: stage2/ext4: remounting $(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")" >> /dev/kmsg
+
+        if [ "$spoof_sparse" = "1" ] && [ -w "/apex" ] && [ ! -e "/apex/$FAKE_APEX_NAME" ]; then
+                mkdir -p "/apex/$FAKE_APEX_NAME@1"
+                busybox mount -o loop,ro,dirsync,seclabel,nodev,noatime "$MNT_FOLDER/rezygisk-ext4" "/apex/$FAKE_APEX_NAME@1"
+                mkdir -p "/apex/$FAKE_APEX_NAME"
+                busybox mount --bind,ro "/apex/$FAKE_APEX_NAME@1" "/apex/$FAKE_APEX_NAME"
+                rm -rf "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+                busybox ln -sf "/apex/$FAKE_APEX_NAME" "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+        else
+                busybox mount -o loop,ro,noatime,nodiratime "$MNT_FOLDER/rezygisk-ext4" "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+        fi
+
+fi
+
+# mount
+cd "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+single_depth
+# handle this stance when /product is a symlink to /system/product
+for folder in $targets ; do
+        # reset cwd due to loop
+        cd "$MNT_FOLDER/$FAKE_MOUNT_NAME"
+        if [ -L "/$folder" ] && [ ! -L "/system/$folder" ]; then
+                # legacy, so we mount at /system
+                controlled_depth "$folder" "/system/"
+        else
+                # modern, so we mount at root
+                controlled_depth "$folder" "/"
+        fi
 done
 
-# INFO: Unmount staging areas (the per-dir overlays persist independently).
-_meta_log "unmounting staging areas"
-umount -l "$STAGE" 2>/dev/null
-umount -l "$MNT_FOLDER" 2>/dev/null
+if [ "$decoy_mount_enabled" = "1" ] && [ -d "$DECOY_MOUNT_FOLDER" ]; then
+        echo "$DMESG_PREFIX: unmounting $DECOY_MOUNT_FOLDER" >> /dev/kmsg
+        busybox umount -l "$DECOY_MOUNT_FOLDER"
+fi
 
-# Write final status
-_write_status "$EFFECTIVE_MODE"
+# insmod compat
+if command -v /system/bin/insmod > /dev/null 2>&1; then
+        insmod() { /system/bin/insmod "$@"; }
+else
+        insmod() { busybox insmod "$@"; }
+fi
 
-_meta_log "metamount done (effective_mode=$EFFECTIVE_MODE partitions=[$MOUNTED_PARTITIONS] dirs=$MOUNTED_DIRS)"
+# nuke ext4 sysfs
+if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$MODDIR/lkm/$lkm_filename" ] &&
+        { [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; } &&
+        [ "$spoof_sparse" = "0" ]; then
 
-# Write boot_id sentinel
-[ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
+        mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+        kptr_set=$(cat /proc/sys/kernel/kptr_restrict)
+        echo 1 > /proc/sys/kernel/kptr_restrict
+        ptr_address=$(grep " ext4_unregister_sysfs$" /proc/kallsyms | awk {'print "0x"$1'})
+        echo "$DMESG_PREFIX: stage2/ext4: loading LKM with mount_point=$mnt symaddr=$ptr_address" >> /dev/kmsg
+        insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" > /dev/null 2>&1
+        echo $kptr_set > /proc/sys/kernel/kptr_restrict
 
-exit 0
+fi
+
+# ksud kernel nuke-ext4-sysfs
+if [ -f "$MODDIR/ksud_has_nuke_ext4" ] && [ "$spoof_sparse" = "0" ] &&
+        { [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; }; then
+
+        mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+        echo "$DMESG_PREFIX: stage2/ext4: ksud kernel nuke-ext4-sysfs $mnt" >> /dev/kmsg
+        /data/adb/ksud kernel nuke-ext4-sysfs "$mnt"
+
+fi
+
+# unmount stage2
+if [ "$spoof_sparse" = "0" ]; then
+        echo "$DMESG_PREFIX: stage2: unmounting $(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")" >> /dev/kmsg
+        busybox umount -l "$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
+fi
+
+# delete the sparse
+if [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; then
+        [ -f "$MNT_FOLDER/rezygisk-ext4" ] && rm "$MNT_FOLDER/rezygisk-ext4"
+fi
+
+# unmount stage1
+echo "$DMESG_PREFIX: stage1: unmounting $(realpath "$MNT_FOLDER")" >> /dev/kmsg
+busybox umount -l "$MNT_FOLDER"
+
+# handle operating mode
+case $mountify_mounts in
+        1) mode="manual" ;;
+        2) mode="auto" ;;
+esac
+
+if [ "$use_ext4_sparse" = "1" ] || [ -f "$MODDIR/no_tmpfs_xattr" ]; then
+        mode="$mode | ext4"
+else
+        mode="$mode | tmpfs"
+fi
+
+# display if on litemode
+if [ "$APATCH_BIND_MOUNT" = "true" ] && [ -f /data/adb/.litemode_enable ]; then
+        mode="$mode | litemode"
+fi
+
+# generate description accordingly
+string="description=mode: $mode | no modules mounted"
+if [ -f $LOG_FOLDER/modules ]; then
+        module_list=$( for module in $(cat "$LOG_FOLDER/modules" ) ; do printf "$module " ; done )
+        string="description=mode: $mode | modules: $module_list "
+fi
+
+# only update when generated string is different
+desc_current=$(grep "^description=" "$MODDIR/module.prop")
+if [ "$desc_current" != "$string" ]; then
+        sed -i "s/^description=.*/$string/g" "$MODDIR/module.prop"
+fi
+
+# write status file for WebUI
+STATUS=/data/adb/.rz_meta_status
+cat > "$STATUS" <<RASTATS
+configured_mode=$mountify_mounts
+effective_mode=$mode
+source=${KSU:+KSU}${APATCH:+APatch}
+mounted_partitions=$(cat "$LOG_FOLDER/mountify_mount_list" 2>/dev/null | tr '\n' ' ')
+RASTATS
+
+# log after
+cat /proc/mounts > "$LOG_FOLDER/after"
+echo "$DMESG_PREFIX: finished!" >> /dev/kmsg
+
+# EOF
