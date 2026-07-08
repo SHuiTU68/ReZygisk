@@ -65,19 +65,50 @@ _meta_log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOGFILE" 2>/dev/null
 }
 
-if [ -x /data/adb/ksu/bin/busybox ]; then
-  SOURCE=KSU
-elif [ -x /data/adb/ap/bin/busybox ]; then
-  SOURCE=APatch
-else
+# INFO: Write a minimal status file even on early-exit paths, so the WebUI can
+# always display a state (instead of showing nothing when status file absent).
+_write_status() {
+  cat > "$STATUS" <<RASTATS
+configured_mode=${MOUNT_MODE:-auto}
+effective_mode=${1:-$MOUNT_MODE}
+source=${SOURCE:-unknown}
+mount_mode_stage=${STAGE:-}
+mounted_partitions=${MOUNTED_PARTITIONS:-}
+RASTATS
+}
+
+_meta_log "=== metamount.sh invoked (pid=$$) ==="
+
+# INFO: Detect the root implementation. KSU sets KSU=true env var; APatch sets
+# APATCH=true. Fall back to directory existence checks. Magisk is excluded by
+# post-fs-data.sh but we double-check here for safety.
+if [ "$(which magisk)" ]; then
+  _meta_log "Magisk detected — metamodule not supported, exiting"
+  _write_status "unsupported_magisk"
   exit 0
 fi
 
-# INFO: This script is invoked ONCE by KernelSU/APatch as the metamodule mount
-# hook, AFTER all post-fs-data.sh scripts have run (see KSU boot sequence
-# documented in post-fs-data.sh). We do NOT need a double-execution guard —
-# KSU calls metamount.sh exactly once per boot. post-fs-data.sh no longer
-# calls this script.
+if [ "$KSU" = "true" ] || [ -d /data/adb/ksu ]; then
+  SOURCE=KSU
+elif [ "$APATCH" = "true" ] || [ -d /data/adb/ap ]; then
+  SOURCE=APatch
+else
+  _meta_log "no KSU/APatch detected, exiting"
+  _write_status "no_root_impl"
+  exit 0
+fi
+
+# INFO: Boot-id sentinel to prevent double-execution. post-fs-data.sh calls
+# metamount.sh as a fallback; KernelSU-Next may ALSO call it directly later.
+# The first successful run writes the sentinel; subsequent calls in the same
+# boot skip. The sentinel is stored OUTSIDE /data/adb/rezygisk (survives rm-rf).
+RZ_BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+RZ_SENTINEL=/data/adb/.rz_meta_boot_sentinel
+if [ -n "$RZ_BOOT_ID" ] && [ -f "$RZ_SENTINEL" ] \
+   && [ "$(cat "$RZ_SENTINEL" 2>/dev/null)" = "$RZ_BOOT_ID" ]; then
+  _meta_log "metamount already ran this boot (boot_id=$RZ_BOOT_ID), skipping"
+  exit 0
+fi
 
 # INFO: Read user configuration. DEFAULT: enabled=false for safety.
 # User must explicitly enable via WebUI or install-time prompt.
@@ -93,6 +124,7 @@ fi
 
 if [ "$ENABLED" != "true" ]; then
   _meta_log "metamount disabled by config (enabled=$ENABLED), exiting"
+  _write_status "disabled"
   exit 0
 fi
 
@@ -199,13 +231,8 @@ _meta_log "partitions discovered:[$PARTITIONS]"
 # (no probe needed since nothing mounts) and record empty mounted_partitions.
 if [ -z "$PARTITIONS" ]; then
   _meta_log "no partitions to mount (no whitelisted modules), writing status and exiting"
-  cat > "$STATUS" <<RASTAT_EMPTY
-configured_mode=$MOUNT_MODE
-effective_mode=$MOUNT_MODE
-source=$SOURCE
-mount_mode_stage=
-mounted_partitions=
-RASTAT_EMPTY
+  _write_status "$MOUNT_MODE"
+  [ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
   exit 0
 fi
 
@@ -444,6 +471,17 @@ for P in $PARTITIONS; do
   esac
   [ -d "$lower" ] || { _meta_log "skip $P: $lower not a dir"; continue; }
 
+  # INFO: Skip if this partition is ALREADY an overlay mounted by KSU/APatch.
+  # On non-Next KernelSU (which doesn't support metamodule=1 and mounts modules
+  # itself), the partition would already be overlaid by the time we run. We
+  # detect this by checking mount info for an overlay with source KSU/APatch on
+  # this mountpoint. This avoids stacking a second overlay on top.
+  if mount 2>/dev/null | grep -q "on ${lower} .*overlay.*\\(KSU\\|APatch\\)"; then
+    _meta_log "skip $P: already overlaid by $SOURCE (root impl mounted it)"
+    MOUNTED_PARTITIONS="$MOUNTED_PARTITIONS $P"
+    continue
+  fi
+
   # INFO: Skip partitions that are symlinks (e.g. /vendor -> /system/vendor on
   # some devices). Overlaying a symlink target double-mounts and can break.
   # meta-overlayfs does the same check.
@@ -516,12 +554,18 @@ for P in $PARTITIONS; do
   fi
 done
 
-# INFO: Append the list of actually-mounted partitions to the status file so
-# the WebUI can show which partitions are currently overlaid.
+# INFO: Write final status with effective mode and mounted partitions list.
+_write_status "$MOUNT_MODE"
+# Append mounted_partitions (already in _write_status via MOUNTED_PARTITIONS,
+# but explicitly re-write to be safe after the mount loop).
 cat >> "$STATUS" <<RASTAT2
 mounted_partitions=$(echo $MOUNTED_PARTITIONS)
 RASTAT2
 
 _meta_log "metamount done (effective_mode=$MOUNT_MODE mounted=[$MOUNTED_PARTITIONS])"
+
+# INFO: Write the boot_id sentinel so KSU-Next's direct invocation of
+# metamount.sh (if it happens later this boot) skips re-execution.
+[ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
 
 exit 0

@@ -25,22 +25,19 @@ fi
 # INFO: As the active metamodule (metamodule=1 in module.prop), Hrezygisk is
 # responsible for mounting other modules' system/ dirs via overlay.
 #
-# IMPORTANT: Do NOT call metamount.sh from here. KernelSU/APatch invoke
-# metamount.sh DIRECTLY as the metamodule mount hook (after ALL post-fs-data.sh
-# scripts — both metamodule's and regular modules' — have run, and after
-# system.prop is loaded). This is the documented KSU boot sequence:
-#   1. post-fs-data.d scripts
-#   2. prune modules, restorecon, sepolicy
-#   3. metamodule's post-fs-data.sh   ← we are here
-#   4. regular modules' post-fs-data.sh
-#   5. load system.prop
-#   6. metamodule's metamount.sh      ← KSU calls this directly, ONCE
-#   7. post-mount.d
+# We call metamount.sh from here as a FALLBACK. KernelSU-Next may also call
+# metamount.sh directly at a later boot stage — metamount.sh internally uses a
+# boot_id sentinel to detect and skip double-execution. This dual-invocation
+# strategy ensures metamount.sh runs regardless of whether the KSU version
+# supports direct metamodule hook invocation.
 #
-# Calling metamount.sh here would run it at step 3 (too early — regular module
-# content may not be ready) AND KSU would call it again at step 6 (double exec
-# → second overlay over an already-overlaid /system fails). So metamount.sh is
-# intentionally NOT invoked from post-fs-data.sh.
+# Magisk does NOT support metamodule=1 — it mounts modules itself. So we skip
+# metamount.sh entirely on Magisk to avoid double-mounting.
+if ! [ "$(which magisk)" ]; then
+  if [ -f "$MODDIR/metamount.sh" ]; then
+    sh "$MODDIR/metamount.sh" || log -p w -t "zygisk-sh" "metamount.sh returned non-zero, continuing"
+  fi
+fi
 
 create_sys_perm() {
   mkdir -p $1
