@@ -177,13 +177,29 @@
         "medium": "Medium (500)",
         "bold": "Bold (700)"
       },
+      "floatingNavbar": {
+        "title": "Floating Navbar",
+        "description": "Turn the bottom navbar into a floating pill instead of a full-width bottom bar."
+      },
+      "monetColor": {
+        "title": "Monet Color",
+        "description": "Override the current theme accent with a Material You Monet-style palette."
+      },
       "liquidGlass": {
-        "title": "iOS Liquid Glass",
+        "title": "Liquid Glass",
         "description": "Enable translucent frosted glass effect on cards, navbar, and headers. Uses backdrop-filter, requires device support."
       },
       "blurIntensity": {
-        "title": "Blur Intensity",
-        "description": "Adjust the background blur radius for the liquid glass effect. Higher = more blurry. Only effective when liquid glass is on."
+        "title": "Card Blur Intensity",
+        "description": "Adjust the background blur radius for cards. Higher = more blurry. Only effective when liquid glass is on."
+      },
+      "navbarBlur": {
+        "title": "Navbar Blur",
+        "description": "Adjust the background blur radius for the bottom navbar. Only effective when liquid glass is on."
+      },
+      "headerBlur": {
+        "title": "Header Blur",
+        "description": "Adjust the background blur radius for the top header. Only effective when liquid glass is on."
       },
       "moduleDevelopers": "Module Developer(s)",
       "WebUIDevelopers": "WebUI Developer(s)",

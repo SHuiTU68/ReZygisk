@@ -88,6 +88,40 @@
     </select>
   </div>
 
+  <!-- INFO: Floating navbar toggle -->
+  <div class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{floatingNavbar.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{floatingNavbar.description}}
+      </div>
+    </div>
+
+    <label class="switch dimc">
+      <input id="rz_floating_navbar_switch" type="checkbox">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <!-- INFO: Monet color toggle -->
+  <div class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{monetColor.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{monetColor.description}}
+      </div>
+    </div>
+
+    <label class="switch dimc">
+      <input id="rz_monet_color_switch" type="checkbox">
+      <span class="slider"></span>
+    </label>
+  </div>
+
   <!-- INFO: iOS Liquid Glass effect toggle -->
   <div class="small_card dimc" style="margin-top: 15px;">
     <div class="action_card">
@@ -105,7 +139,7 @@
     </label>
   </div>
 
-  <!-- INFO: Blur intensity slider (only effective when liquid glass is on) -->
+  <!-- INFO: Blur intensity slider (cards, only effective when liquid glass is on) -->
   <div id="rz_blur_card" class="small_card dimc" style="margin-top: 15px;">
     <div class="action_card">
       <div class="dimc content action_card_title">
@@ -118,6 +152,38 @@
     <div class="dimc" style="display: flex; align-items: center; gap: 10px; margin-top: 8px; width: 100%;">
       <input id="rz_blur_intensity_range" type="range" min="0" max="40" step="2" value="12" class="dimc" style="flex: 1;">
       <span id="rz_blur_intensity_value" class="dimc desc" style="font-size: 0.9em; min-width: 38px; text-align: right;">12px</span>
+    </div>
+  </div>
+
+  <!-- INFO: Navbar blur slider (only effective when liquid glass is on) -->
+  <div id="rz_navbar_blur_card" class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{navbarBlur.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{navbarBlur.description}}
+      </div>
+    </div>
+    <div class="dimc" style="display: flex; align-items: center; gap: 10px; margin-top: 8px; width: 100%;">
+      <input id="rz_navbar_blur_range" type="range" min="0" max="40" step="2" value="12" class="dimc" style="flex: 1;">
+      <span id="rz_navbar_blur_value" class="dimc desc" style="font-size: 0.9em; min-width: 38px; text-align: right;">12px</span>
+    </div>
+  </div>
+
+  <!-- INFO: Header blur slider (only effective when liquid glass is on) -->
+  <div id="rz_header_blur_card" class="small_card dimc" style="margin-top: 15px;">
+    <div class="action_card">
+      <div class="dimc content action_card_title">
+        {{headerBlur.title}}
+      </div>
+      <div class="dimc desc action_card_description">
+        {{headerBlur.description}}
+      </div>
+    </div>
+    <div class="dimc" style="display: flex; align-items: center; gap: 10px; margin-top: 8px; width: 100%;">
+      <input id="rz_header_blur_range" type="range" min="0" max="40" step="2" value="12" class="dimc" style="flex: 1;">
+      <span id="rz_header_blur_value" class="dimc desc" style="font-size: 0.9em; min-width: 38px; text-align: right;">12px</span>
     </div>
   </div>
 

@@ -145,7 +145,7 @@ async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
 
   if (ReZygiskState == null) {
     rz_state.innerHTML = strings.unknown
-    rz_icon_state.innerHTML = '<img class="brightc" src="assets/mark.svg">'
+    rz_icon_state.innerHTML = '<img src="assets/mark.svg">'
     document.getElementById('zygote_class').style.display = 'none'
     /* INFO: This hides the throbber screen */
     loading_screen.style.display = 'none'
@@ -199,12 +199,12 @@ async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
     rz_state.innerHTML = strings.status.ok
 
     rootCss.style.setProperty('--bright', '#545454')
-    rz_icon_state.innerHTML = '<img class="brightc" src="assets/tick.svg">'
+    rz_icon_state.innerHTML = '<img src="assets/tick.svg">'
   } else {
     rz_state.innerHTML = strings.status.partially
 
     rootCss.style.setProperty('--bright', '#766000')
-    rz_icon_state.innerHTML = '<img class="brightc" src="assets/warn.svg">'
+    rz_icon_state.innerHTML = '<img src="assets/warn.svg">'
   }
 
   if (ReZygiskState.zygote === undefined) {

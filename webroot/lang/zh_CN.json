@@ -177,13 +177,29 @@
         "medium": "中等 (500)",
         "bold": "粗体 (700)"
       },
+      "floatingNavbar": {
+        "title": "悬浮底栏",
+        "description": "将底部导航栏变为悬浮胶囊样式，而不是贴底全宽。"
+      },
+      "monetColor": {
+        "title": "Monet 颜色",
+        "description": "使用 Material You Monet 风格的柔和配色覆盖当前主题强调色。"
+      },
       "liquidGlass": {
-        "title": "iOS 液态玻璃",
+        "title": "液晶玻璃",
         "description": "为卡片、导航栏和标题栏启用半透明毛玻璃效果。基于 backdrop-filter 实现，需要设备支持。"
       },
       "blurIntensity": {
-        "title": "模糊强度",
-        "description": "调整液态玻璃效果的背景模糊半径。值越大越模糊。仅在液态玻璃开启时生效。"
+        "title": "卡片模糊强度",
+        "description": "调整卡片区域的背景模糊半径。值越大越模糊。仅在液态玻璃开启时生效。"
+      },
+      "navbarBlur": {
+        "title": "底栏模糊",
+        "description": "调整底部导航栏的背景模糊半径。仅在液态玻璃开启时生效。"
+      },
+      "headerBlur": {
+        "title": "顶栏模糊",
+        "description": "调整顶部标题栏的背景模糊半径。仅在液态玻璃开启时生效。"
       },
       "moduleDevelopers": "模块开发者",
       "WebUIDevelopers": "WebUI 开发者",

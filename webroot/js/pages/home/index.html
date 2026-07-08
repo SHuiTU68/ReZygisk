@@ -1,67 +1,73 @@
 <div class="panel">
-  <div class="header">Hrezygisk</div>
+  <!-- INFO: KernelSU-style large hero title -->
+  <div class="ksu-hero-title">Hrezygisk</div>
 
   <!-- INFO: Status card -->
-  <div id="info_card" class="bright card list">
-    <div class="brightc" style="display: flex; align-items: center;">
-      <div id="rz_icon_state" class="brightc" style="display: flex; align-items: center;">
-        <img class="brightc" src="assets/mark.svg">
+  <div id="info_card" class="card ksu-status-card">
+    <div class="ksu-status-content">
+      <div id="rz_icon_state" class="ksu-status-icon">
+        <img src="assets/mark.svg">
       </div>
+      <div id="rz_state" class="ksu-status-text">{{unknown}}</div>
+    </div>
+  </div>
 
-      <div id="rz_state" class="brightc lock" style="font-size: 1.2em; padding-left: 15px;">
-        {{unknown}}
-      </div>
+  <!-- INFO: Stats grid (KernelSU-style small cards) -->
+  <div class="ksu-stats-grid">
+    <div class="card ksu-stat-card">
+      <div class="ksu-stat-label">Android</div>
+      <div class="ksu-stat-value" id="android_version_div">{{unknown}}</div>
+    </div>
+    <div class="card ksu-stat-card">
+      <div class="ksu-stat-label">Kernel</div>
+      <div class="ksu-stat-value" id="kernel_version_div">{{unknown}}</div>
     </div>
   </div>
 
   <!-- INFO: Info card -->
-  <div class="dim card">
-    <div class="dimc" style="margin-bottom: 14px;">
-      <div class="dimc" style="font-size: 0.8em">ROM / Kernel</div>
+  <div class="card ksu-info-card">
+    <div class="ksu-info-section">
+      <div class="ksu-info-section-title">ROM / Kernel</div>
+      <div class="ksu-info-row">
+        <div class="ksu-info-label">{{androidVersion}}</div>
+        <div class="ksu-info-value desc" id="android_version">{{unknown}}</div>
+      </div>
+      <div class="ksu-info-row">
+        <div class="ksu-info-label">{{linuxKernelVersion}}</div>
+        <div class="ksu-info-value desc" id="kernel_version">{{unknown}}</div>
+      </div>
     </div>
 
-    <div id="android_version" class="dimc">
-      <div class="dimc" style="font-size: 17px">{{androidVersion}}</div>
-      <div class="dimc desc" id="android_version_div" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-    <div id="kernel_version" class="dimc" style="margin-top: 5px;">
-      <div class="dimc" style="font-size: 17px">{{linuxKernelVersion}}</div>
-      <div class="dimc desc" id="kernel_version_div" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-
-    <div class="dimc" style="margin-top: 18px; margin-bottom: 14px;">
-      <div class="dimc" style="font-size: 0.8em;">Root / Hrezygisk</div>
-    </div>
-
-    <div class="dimc content">
-      <div class="dimc" style="font-size: 17px">{{info.version}}</div>
-      <div class="dimc desc" id="version_code" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-    <div class="dimc content">
-      <div class="dimc" style="font-size: 17px">{{info.root}}</div>
-      <div class="dimc desc" id="root_impl" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
+    <div class="ksu-info-section">
+      <div class="ksu-info-section-title">Root / Hrezygisk</div>
+      <div class="ksu-info-row">
+        <div class="ksu-info-label">{{info.version}}</div>
+        <div class="ksu-info-value desc" id="version_code">{{unknown}}</div>
+      </div>
+      <div class="ksu-info-row">
+        <div class="ksu-info-label">{{info.root}}</div>
+        <div class="ksu-info-value desc" id="root_impl">{{unknown}}</div>
+      </div>
     </div>
 
-    <div id="meta_mount_class" class="dimc" style="margin-top: 12px; margin-bottom: 14px; display: none;">
-      <div class="dimc" style="font-size: 0.8em">{{info.metaMount.title}}</div>
+    <div id="meta_mount_class" class="ksu-info-section" style="display: none;">
+      <div class="ksu-info-section-title">{{info.metaMount.title}}</div>
+      <div id="meta_mount_row" class="ksu-info-row" style="display: none;">
+        <div class="ksu-info-label">{{info.metaMount.mode}}</div>
+        <div class="ksu-info-value desc" id="meta_mount_status">{{unknown}}</div>
+      </div>
     </div>
 
-    <div id="meta_mount_row" class="dimc content" style="display: none;">
-      <div class="dimc" style="font-size: 17px">{{info.metaMount.mode}}</div>
-      <div class="dimc desc" id="meta_mount_status" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-
-    <div id="zygote_class" class="dimc" style="margin-top: 12px; margin-bottom: 14px;">
-      <div class="dimc" style="font-size: 0.8em">Zygotes</div>
-    </div>
-
-    <div id="zygote32" class="dimc content">
-      <div class="dimc" style="font-size: 17px">Zygote32</div>
-      <div class="dimc desc" id="zygote32_status" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-    <div id="zygote64" class="dimc">
-      <div class="dimc" style="font-size: 17px">Zygote64</div>
-      <div class="dimc desc" id="zygote64_status" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
+    <div id="zygote_class" class="ksu-info-section">
+      <div class="ksu-info-section-title">Zygotes</div>
+      <div id="zygote32" class="ksu-info-row">
+        <div class="ksu-info-label">Zygote32</div>
+        <div class="ksu-info-value desc" id="zygote32_status">{{unknown}}</div>
+      </div>
+      <div id="zygote64" class="ksu-info-row">
+        <div class="ksu-info-label">Zygote64</div>
+        <div class="ksu-info-value desc" id="zygote64_status">{{unknown}}</div>
+      </div>
     </div>
   </div>
 </div>

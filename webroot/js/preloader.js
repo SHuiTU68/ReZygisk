@@ -53,32 +53,51 @@ if (ConfigState.enableSystemFont) {
   `
 }
 
-/* INFO: Apply iOS Liquid Glass + blur intensity at boot. The liquid glass
- * effect uses backdrop-filter on cards/navbar; blur intensity controls the
- * blur radius via the --glass-blur CSS variable. */
+/* INFO: Apply floating navbar at boot. */
+if (ConfigState.floatingNavbar === true) {
+  const navbar = document.getElementById('navbar')
+  if (navbar) navbar.classList.add('floating')
+}
+
+/* INFO: Apply Monet color at boot. */
+if (ConfigState.monetColor === true) {
+  const headTag = document.getElementsByTagName('head')[0]
+  const styleTag = document.createElement('style')
+  styleTag.id = 'monet-color-tag'
+  headTag.appendChild(styleTag)
+  styleTag.innerHTML = `
+    :root {
+      --primary: #D0BCFF;
+      --on-primary: #381E72;
+      --primary-container: #4F378B;
+      --on-primary-container: #EADDFF;
+      --secondary: #CCC2DC;
+      --on-secondary: #332D41;
+      --secondary-container: #4A4458;
+      --on-secondary-container: #E8DEF8;
+      --tertiary: #EFB8C8;
+      --on-tertiary: #492532;
+      --tertiary-container: #633B48;
+      --on-tertiary-container: #FFD8E4;
+    }
+  `
+}
+
+/* INFO: Apply iOS Liquid Glass + blur intensity at boot. */
 if (ConfigState.liquidGlass === true) {
   const headTag = document.getElementsByTagName('head')[0]
   const styleTag = document.createElement('style')
   styleTag.id = 'liquid-glass-tag'
   headTag.appendChild(styleTag)
   styleTag.innerHTML = `
-    body.rz-liquid-glass {
-      --glass-blur: ${ConfigState.blurIntensity || 12}px;
-    }
     body.rz-liquid-glass .card,
     body.rz-liquid-glass .small_card,
-    body.rz-liquid-glass .miuix-group,
-    body.rz-liquid-glass #navbar {
+    body.rz-liquid-glass .miuix-group {
       background-color: color-mix(in srgb, var(--surface) 65%, transparent) !important;
       backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.5);
       -webkit-backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.5);
       border: 1px solid color-mix(in srgb, var(--on-surface) 8%, transparent);
       box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08), inset 0 1px 0 color-mix(in srgb, var(--on-surface) 6%, transparent);
-    }
-    body.rz-liquid-glass .header {
-      background-color: color-mix(in srgb, var(--background) 70%, transparent) !important;
-      backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.3);
-      -webkit-backdrop-filter: blur(var(--glass-blur, 12px)) saturate(1.3);
     }
     body.rz-liquid-glass .ma-item {
       background-color: color-mix(in srgb, var(--surface) 50%, transparent) !important;
@@ -86,6 +105,8 @@ if (ConfigState.liquidGlass === true) {
   `
   document.body.classList.add('rz-liquid-glass')
   document.body.style.setProperty('--glass-blur', `${ConfigState.blurIntensity || 12}px`)
+  document.body.style.setProperty('--navbar-blur', `${ConfigState.navbarBlur || 12}px`)
+  document.body.style.setProperty('--header-blur', `${ConfigState.headerBlur || 12}px`)
 }
 
 /* INFO: This code are meant to load the link with any card have credit-link attribute inside it */

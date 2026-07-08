@@ -66,10 +66,13 @@
 }
 
 * {
-  background-color: var(--background);
   color: var(--font);
   font-family: var(--font-family);
   user-select: none;
+}
+
+html, body {
+  background-color: var(--background);
 }
 
 body {

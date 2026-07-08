@@ -6,3 +6,119 @@
 .lock {
   color: var(--lock);
 }
+
+/* KernelSU-style hero title */
+.ksu-hero-title {
+  font-size: 2.4em;
+  font-weight: 700;
+  padding: 24px 15px 16px;
+  color: var(--on-background);
+  letter-spacing: -0.5px;
+}
+
+/* KernelSU-style status card */
+.ksu-status-card {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  margin: 0 15px 15px;
+  padding: 22px 20px;
+  border-radius: var(--radius-xl);
+  display: flex;
+  align-items: center;
+}
+
+.ksu-status-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ksu-status-icon img {
+  width: 32px;
+  height: 32px;
+  display: block;
+}
+
+.ksu-status-text {
+  font-size: 1.35em;
+  font-weight: 600;
+}
+
+/* KernelSU-style stats grid */
+.ksu-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 15px 15px;
+}
+
+.ksu-stat-card {
+  padding: 18px 14px;
+  text-align: center;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+}
+
+.ksu-stat-label {
+  font-size: 0.82em;
+  color: var(--on-surface-variant);
+  margin-bottom: 6px;
+}
+
+.ksu-stat-value {
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--on-surface);
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+/* KernelSU-style info card */
+.ksu-info-card {
+  margin: 0 15px 15px;
+  padding: 18px;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+}
+
+.ksu-info-section {
+  margin-bottom: 18px;
+}
+
+.ksu-info-section:last-child {
+  margin-bottom: 0;
+}
+
+.ksu-info-section-title {
+  font-size: 0.75em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.ksu-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 0.75px solid var(--outline-variant);
+  gap: 12px;
+}
+
+.ksu-info-row:last-child {
+  border-bottom: none;
+}
+
+.ksu-info-label {
+  font-size: 1em;
+  color: var(--on-surface);
+  flex-shrink: 0;
+}
+
+.ksu-info-value {
+  font-size: 0.9em;
+  text-align: right;
+  word-break: break-word;
+}

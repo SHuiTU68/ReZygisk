@@ -51,7 +51,7 @@ export function setLight(chooseSet) {
 }
 
 function setData(mode) {
-  localStorage.setItem('/ReZygisk/theme', mode)
+  localStorage.setItem('/Hrezygisk/theme', mode)
 
   return mode
 }
