@@ -116,16 +116,16 @@
           "placeholder": "rezygisk"
         },
         "lkmNuke": {
-          "title": "注销 ext4 sysfs (ko)",
-          "description": "加载 nuke.ko 注销 ext4 挂载的 /proc/fs/ext4 节点，使 ext4 暂存挂载更难被检测。仅在 ext4 模式下有效。需要内核 6.6 (Android 15)。",
+          "title": "隐藏挂载痕迹",
+          "description": "挂载完成后自动隐藏暂存点，使模块挂载更难被检测。tmpfs 模式下卸载 stage1 暂存 tmpfs；ext4 模式下加载 nuke.ko 注销 ext4 sysfs 节点并卸载 stage2 镜像。",
           "mountPoint": {
             "title": "注销挂载点",
-            "description": "要注销 sysfs 节点的 ext4 挂载点路径。留空 = 自动使用暂存挂载点。",
+            "description": "ext4 模式下要注销 sysfs 节点的挂载点路径。留空 = 自动使用暂存挂载点。tmpfs 模式下忽略此项。",
             "placeholder": "自动"
           },
-          "loaded": "已加载",
-          "notLoaded": "未加载",
-          "loadFailed": "加载失败"
+          "loaded": "已隐藏",
+          "notLoaded": "未隐藏",
+          "loadFailed": "隐藏失败"
         }
       },
       "partitions": {

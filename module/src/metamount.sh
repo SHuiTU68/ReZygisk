@@ -17,9 +17,10 @@ sparse_size="2048"
 test_decoy_mount=0
 DECOY_MOUNT_FOLDER="/oem"
 mountify_expert_mode=0
-enable_lkm_nuke=0
+enable_lkm_nuke=1
 lkm_filename="nuke.ko"
 nuke_mount_point=""
+enable_hide=1
 # read config
 PERSISTENT_DIR="/data/adb/rezygisk_meta"
 . $PERSISTENT_DIR/config.sh
@@ -350,68 +351,72 @@ else
         insmod() { busybox insmod "$@"; }
 fi
 
-# nuke ext4 sysfs
+# nuke ext4 sysfs — only in ext4 mode (tmpfs has no ext4 sysfs node).
+# enable_hide drives this: in ext4 mode, enable_lkm_nuke is honored; in tmpfs
+# mode the ko would no-op anyway (ko checks for ext4 superblock internally).
 ko_loaded=0
-if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$MODDIR/lkm/$lkm_filename" ] &&
-        { [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; } &&
-        [ "$spoof_sparse" = "0" ]; then
-
-        # Determine which ext4 mount to nuke. If nuke_mount_point is set in
-        # config.sh, use it; otherwise auto-detect the staging mount.
-        if [ -n "$nuke_mount_point" ]; then
-                mnt="$nuke_mount_point"
-        else
-                mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
-        fi
-        kptr_set=$(cat /proc/sys/kernel/kptr_restrict)
-        echo 1 > /proc/sys/kernel/kptr_restrict
-        # INFO: The improved nuke.ko auto-resolves ext4_unregister_sysfs via
-        # kallsyms_lookup_name (kprobe trick on >= 5.7). We still grep the
-        # address as a fallback and pass it via symaddr — if kallsyms_lookup_name
-        # is unavailable, the ko uses symaddr instead.
-        ptr_address=$(grep " ext4_unregister_sysfs$" /proc/kallsyms | awk {'print "0x"$1'})
-        echo "$DMESG_PREFIX: stage2/ext4: loading LKM with mount_point=$mnt symaddr=$ptr_address" >> /dev/kmsg
-        if insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" 2>>"$LOG_FOLDER/nuke_err"; then
-                ko_loaded=1
-                echo "$DMESG_PREFIX: stage2/ext4: LKM loaded, nuked $mnt" >> /dev/kmsg
-        else
-                echo "$DMESG_PREFIX: stage2/ext4: LKM load FAILED for $mnt" >> /dev/kmsg
-                cat "$LOG_FOLDER/nuke_err" >> /dev/kmsg
-        fi
-        echo $kptr_set > /proc/sys/kernel/kptr_restrict
-
+is_ext4_mode=0
+if [ "$use_ext4_sparse" = "1" ] || [ -f "$MODDIR/no_tmpfs_xattr" ]; then
+        is_ext4_mode=1
 fi
 
-# ksud kernel nuke-ext4-sysfs
-if [ -f "$MODDIR/ksud_has_nuke_ext4" ] && [ "$spoof_sparse" = "0" ] &&
-        { [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; }; then
-
-        if [ -n "$nuke_mount_point" ]; then
-                mnt="$nuke_mount_point"
-        else
-                mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
-        fi
-        echo "$DMESG_PREFIX: stage2/ext4: ksud kernel nuke-ext4-sysfs $mnt" >> /dev/kmsg
-        if /data/adb/ksud kernel nuke-ext4-sysfs "$mnt" 2>>"$LOG_FOLDER/nuke_err"; then
-                ko_loaded=1
-        fi
-
+# Determine the mount point to nuke (used for both ko and ksud paths).
+if [ -n "$nuke_mount_point" ]; then
+        mnt="$nuke_mount_point"
+else
+        mnt="$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
 fi
 
-# unmount stage2
-if [ "$spoof_sparse" = "0" ]; then
+if [ "$enable_hide" = "1" ] && [ "$is_ext4_mode" = "1" ] && [ "$spoof_sparse" = "0" ]; then
+        if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$MODDIR/lkm/$lkm_filename" ]; then
+                kptr_set=$(cat /proc/sys/kernel/kptr_restrict)
+                echo 1 > /proc/sys/kernel/kptr_restrict
+                # INFO: The improved nuke.ko auto-resolves ext4_unregister_sysfs via
+                # kallsyms_lookup_name (kprobe trick on >= 5.7). We still grep the
+                # address as a fallback and pass it via symaddr — if kallsyms_lookup_name
+                # is unavailable, the ko uses symaddr instead.
+                ptr_address=$(grep " ext4_unregister_sysfs$" /proc/kallsyms | awk {'print "0x"$1'})
+                echo "$DMESG_PREFIX: stage2/ext4: loading LKM with mount_point=$mnt symaddr=$ptr_address" >> /dev/kmsg
+                if insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" 2>>"$LOG_FOLDER/nuke_err"; then
+                        ko_loaded=1
+                        echo "$DMESG_PREFIX: stage2/ext4: LKM loaded, nuked $mnt" >> /dev/kmsg
+                else
+                        echo "$DMESG_PREFIX: stage2/ext4: LKM load FAILED for $mnt" >> /dev/kmsg
+                        cat "$LOG_FOLDER/nuke_err" >> /dev/kmsg
+                fi
+                echo $kptr_set > /proc/sys/kernel/kptr_restrict
+        fi
+
+        # ksud kernel nuke-ext4-sysfs (KernelSU 22105+ has native support)
+        if [ -f "$MODDIR/ksud_has_nuke_ext4" ]; then
+                echo "$DMESG_PREFIX: stage2/ext4: ksud kernel nuke-ext4-sysfs $mnt" >> /dev/kmsg
+                if /data/adb/ksud kernel nuke-ext4-sysfs "$mnt" 2>>"$LOG_FOLDER/nuke_err"; then
+                        ko_loaded=1
+                fi
+        fi
+fi
+
+# unmount stage2 (ext4 mode only — tmpfs has no separate stage2 image)
+if [ "$is_ext4_mode" = "1" ] && [ "$spoof_sparse" = "0" ]; then
         echo "$DMESG_PREFIX: stage2: unmounting $(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")" >> /dev/kmsg
         busybox umount -l "$(realpath "$MNT_FOLDER/$FAKE_MOUNT_NAME")"
 fi
 
-# delete the sparse
-if [ -f "$MODDIR/no_tmpfs_xattr" ] || [ "$use_ext4_sparse" = "1" ]; then
+# delete the sparse image (ext4 mode only)
+if [ "$is_ext4_mode" = "1" ]; then
         [ -f "$MNT_FOLDER/rezygisk-ext4" ] && rm "$MNT_FOLDER/rezygisk-ext4"
 fi
 
-# unmount stage1
-echo "$DMESG_PREFIX: stage1: unmounting $(realpath "$MNT_FOLDER")" >> /dev/kmsg
-busybox umount -l "$MNT_FOLDER"
+# INFO: Anti-detection hide — unmount the stage1 tmpfs staging point so it
+# disappears from /proc/mounts. This is the tmpfs-mode hiding mechanism.
+# In ext4 mode, stage2 was already unmounted above; stage1 unmount hides
+# the tmpfs that backed the staging folder.
+# Per-dir overlays (the actual module mounts) survive because the kernel
+# has already resolved lowerdir inodes at mount time.
+if [ "$enable_hide" = "1" ]; then
+        echo "$DMESG_PREFIX: hide: unmounting stage1 $(realpath "$MNT_FOLDER")" >> /dev/kmsg
+        busybox umount -l "$MNT_FOLDER"
+fi
 
 # handle operating mode
 case $mountify_mounts in
@@ -448,12 +453,17 @@ if [ "$desc_current" != "$string" ]; then
 fi
 
 # write status file for WebUI — separate fields so the UI can display each
-# independently (e.g. "auto (ext4)" on the home page, ko status, etc.)
+# independently (e.g. "auto (ext4)" on the home page, hide status, etc.)
 STATUS=/data/adb/.rz_meta_status
+# hide_active = 1 when stage1 was actually unmounted (hide took effect)
+hide_active=0
+[ "$enable_hide" = "1" ] && hide_active=1
 cat > "$STATUS" <<RASTATS
 configured_mode=$mountify_mounts
 effective_mode=$mode
 staging_mode=$staging_mode
+hide_enabled=$enable_hide
+hide_active=$hide_active
 ko_enabled=$enable_lkm_nuke
 ko_loaded=$ko_loaded
 ko_mount_point=$mnt

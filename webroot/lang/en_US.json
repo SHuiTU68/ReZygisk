@@ -116,16 +116,16 @@
           "placeholder": "rezygisk"
         },
         "lkmNuke": {
-          "title": "Unregister ext4 sysfs (ko)",
-          "description": "Load nuke.ko to unregister the /proc/fs/ext4 node for the ext4 staging mount, making it harder to detect. Only effective in ext4 mode. Requires kernel 6.6 (Android 15).",
+          "title": "Hide Mount Traces",
+          "description": "Automatically hide the staging point after mounting, making module mounts harder to detect. In tmpfs mode, unmounts the stage1 tmpfs; in ext4 mode, loads nuke.ko to unregister the ext4 sysfs node and unmounts the stage2 image.",
           "mountPoint": {
             "title": "Nuke Mount Point",
-            "description": "ext4 mount point to unregister the sysfs node for. Empty = auto (uses staging mount point).",
+            "description": "ext4 mount point to unregister the sysfs node for. Empty = auto (uses staging mount point). Ignored in tmpfs mode.",
             "placeholder": "auto"
           },
-          "loaded": "loaded",
-          "notLoaded": "not loaded",
-          "loadFailed": "load failed"
+          "loaded": "hidden",
+          "notLoaded": "not hidden",
+          "loadFailed": "hide failed"
         }
       },
       "partitions": {

@@ -34,10 +34,18 @@ DECOY_MOUNT_FOLDER="/oem"
 # mountify_expert_mode: 1 = skip safety checks (dangerous)
 mountify_expert_mode=0
 
-# enable_lkm_nuke: 1 = load nuke.ko to unregister ext4 sysfs node
-# Only effective in ext4 mode (use_ext4_sparse=1). The ko unregisters the
-# /proc/fs/ext4/<s_id> node so the ext4 staging mount is harder to detect.
-enable_lkm_nuke=0
+# enable_hide: 1 = enable anti-detection hiding (default on)
+# - tmpfs mode: unmount the stage1 /mnt tmpfs after per-dir overlays are set
+#   up, so the tmpfs staging point itself disappears.
+# - ext4 mode: load nuke.ko to unregister the /proc/fs/ext4 sysfs node, then
+#   unmount the stage2 ext4 image.
+# Both modes keep the per-dir overlays (the actual module mounts) intact.
+enable_hide=1
+
+# enable_lkm_nuke: 1 = load nuke.ko (auto-enabled when enable_hide=1 in ext4
+# mode). Kept as a separate knob for advanced users who want to disable just
+# the ko while keeping stage1 unmount.
+enable_lkm_nuke=1
 
 # lkm_filename: name of the LKM file
 lkm_filename="nuke.ko"

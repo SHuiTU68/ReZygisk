@@ -16,15 +16,16 @@ const MA_STATUS_PATH = '/data/adb/.rz_meta_status'
 // mountify settings (read from config.sh, written via sed):
 //   mountifyMounts: 0=disabled, 2=auto (mountify_mounts in config.sh)
 //   useExt4Sparse: 0=tmpfs, 1=ext4 (use_ext4_sparse in config.sh)
-//   enableLkmNuke: 0=off, 1=on (enable_lkm_nuke in config.sh)
+//   enableHide: 0=off, 1=on (enable_hide in config.sh) — generic hide toggle
 //   fakeName: staging folder name (FAKE_MOUNT_NAME in config.sh)
 //   nukeMountPoint: custom ext4 mount to nuke (nuke_mount_point in config.sh)
 //
 // Runtime status (read from .rz_meta_status):
 //   effectiveMode: "auto" or "manual" (what mountify_mounts resolved to)
 //   stagingMode: "tmpfs" or "ext4" (actual staging method used)
-//   koLoaded: 0 or 1 (whether ko was actually loaded last boot)
-//   koMountPoint: the mount point that was nuked
+//   hideActive: 0 or 1 (whether stage1 was actually unmounted last boot)
+//   koLoaded: 0 or 1 (ext4 mode: whether ko was loaded)
+//   koMountPoint: the mount point that was nuked (ext4 mode only)
 const MetaMountState = {
   isMetamodule: false,
   metaEnabled: false,
@@ -32,8 +33,9 @@ const MetaMountState = {
   effectiveMode: '',
   stagingMode: '',
   fakeName: 'rezygisk',
-  enableLkmNuke: false,
+  enableHide: false,
   nukeMountPoint: '',
+  hideActive: 0,
   koLoaded: 0,
   koMountPoint: '',
   excludedPartitions: [],
@@ -54,12 +56,15 @@ async function _loadMetamoduleStatus() {
 // New format (separate fields):
 //   effective_mode=auto|manual|disabled
 //   staging_mode=tmpfs|ext4
-//   ko_enabled=0|1
-//   ko_loaded=0|1
+//   hide_enabled=0|1
+//   hide_active=0|1  (stage1 was actually unmounted)
+//   ko_enabled=0|1   (ext4 mode: ko would load)
+//   ko_loaded=0|1    (ext4 mode: ko actually loaded)
 //   ko_mount_point=/mnt/...
 async function _loadMetaStatus() {
   MetaMountState.effectiveMode = ''
   MetaMountState.stagingMode = ''
+  MetaMountState.hideActive = 0
   MetaMountState.koLoaded = 0
   MetaMountState.koMountPoint = ''
   const r = await exec(`cat ${MA_STATUS_PATH} 2>/dev/null`)
@@ -77,6 +82,8 @@ async function _loadMetaStatus() {
       const v = sm[1].trim()
       if (v === 'tmpfs' || v === 'ext4') MetaMountState.stagingMode = v
     }
+    const ha = line.match(/^hide_active=(.+)$/)
+    if (ha) MetaMountState.hideActive = parseInt(ha[1].trim()) || 0
     const kl = line.match(/^ko_loaded=(.+)$/)
     if (kl) MetaMountState.koLoaded = parseInt(kl[1].trim()) || 0
     const kmp = line.match(/^ko_mount_point=(.+)$/)
@@ -86,16 +93,16 @@ async function _loadMetaStatus() {
 
 // INFO: Read mountify config.sh — the file metamount.sh sources on boot.
 // This is the AUTHORITATIVE config for mountify_mounts, use_ext4_sparse,
-// enable_lkm_nuke, FAKE_MOUNT_NAME, nuke_mount_point.
+// enable_hide, FAKE_MOUNT_NAME, nuke_mount_point.
 // We map these to the WebUI's higher-level concepts:
 //   mountify_mounts 0 → disabled, non-0 → enabled
 //   use_ext4_sparse 1 → ext4 mode, 0 → auto/tmpfs mode
-//   enable_lkm_nuke 1 → ko on
+//   enable_hide 1 → hide on (generic, both modes)
 async function _loadMountifyCfg() {
   MetaMountState.metaEnabled = false
   MetaMountState.mountMode = 'auto'
   MetaMountState.fakeName = 'rezygisk'
-  MetaMountState.enableLkmNuke = false
+  MetaMountState.enableHide = false
   MetaMountState.nukeMountPoint = ''
   const r = await exec(`cat ${MA_MOUNTIFY_CFG} 2>/dev/null`)
   if (r.errno !== 0) return
@@ -112,9 +119,9 @@ async function _loadMountifyCfg() {
       useExt4Sparse = parseInt(ue[1].trim()) || 0
       return
     }
-    const el = line.match(/^enable_lkm_nuke=(.+)$/)
-    if (el) {
-      MetaMountState.enableLkmNuke = (parseInt(el[1].trim()) || 0) === 1
+    const eh = line.match(/^enable_hide=(.+)$/)
+    if (eh) {
+      MetaMountState.enableHide = (parseInt(eh[1].trim()) || 0) === 1
       return
     }
     const fn = line.match(/^FAKE_MOUNT_NAME="?(.+?)"?$/)
@@ -321,26 +328,30 @@ function _syncUI() {
     }
   }
 
-  // INFO: Show ko toggle only when ext4 mode is selected (ko only works
-  // with ext4 staging). Also show mount_point input when ko is enabled.
+  // INFO: Hide toggle — visible in BOTH tmpfs and ext4 modes (not just ext4).
+  // The mount_point input is only relevant to ext4 mode, so it stays gated.
   const isExt4 = MetaMountState.mountMode === 'ext4'
-  if (lkmCard) lkmCard.style.display = (active && isExt4) ? 'block' : 'none'
-  if (lkmSwitch) lkmSwitch.checked = MetaMountState.enableLkmNuke
-  if (lkmMpCard) lkmMpCard.style.display = (active && isExt4 && MetaMountState.enableLkmNuke) ? 'block' : 'none'
+  if (lkmCard) lkmCard.style.display = active ? 'block' : 'none'
+  if (lkmSwitch) lkmSwitch.checked = MetaMountState.enableHide
+  // mount_point input: only in ext4 mode + hide enabled
+  if (lkmMpCard) lkmMpCard.style.display = (active && isExt4 && MetaMountState.enableHide) ? 'block' : 'none'
   if (lkmMpInput) lkmMpInput.value = MetaMountState.nukeMountPoint
 
-  // INFO: Show ko load status from last boot
+  // INFO: Show hide status from last boot. In tmpfs mode, hideActive reflects
+  // stage1 unmount; in ext4 mode, koLoaded reflects ko load success.
   if (lkmStatusEl) {
-    if (MetaMountState.enableLkmNuke && MetaMountState.effectiveMode) {
+    if (MetaMountState.enableHide && MetaMountState.effectiveMode) {
       lkmStatusEl.style.display = 'block'
+      // Determine success: in ext4 mode check koLoaded; in tmpfs check hideActive
+      const success = isExt4 ? (MetaMountState.koLoaded === 1) : (MetaMountState.hideActive === 1)
       let statusText
-      if (MetaMountState.koLoaded === 1) {
-        statusText = `${strings_cache?.settings?.lkmNuke?.loaded || 'loaded'}`
-        if (MetaMountState.koMountPoint) {
+      if (success) {
+        statusText = `${strings_cache?.settings?.lkmNuke?.loaded || 'hidden'}`
+        if (isExt4 && MetaMountState.koMountPoint) {
           statusText += `: ${MetaMountState.koMountPoint}`
         }
       } else {
-        statusText = `${strings_cache?.settings?.lkmNuke?.loadFailed || 'load failed'}`
+        statusText = `${strings_cache?.settings?.lkmNuke?.loadFailed || 'hide failed'}`
       }
       lkmStatusEl.innerText = statusText
     } else {
@@ -510,8 +521,8 @@ function _setupListeners() {
   }
   if (lkmSwitch) {
     lkmSwitch.addEventListener('change', () => {
-      MetaMountState.enableLkmNuke = lkmSwitch.checked
-      _writeMountifyKey('enable_lkm_nuke', lkmSwitch.checked ? 1 : 0, false)
+      MetaMountState.enableHide = lkmSwitch.checked
+      _writeMountifyKey('enable_hide', lkmSwitch.checked ? 1 : 0, false)
       _syncUI()
     })
   }
