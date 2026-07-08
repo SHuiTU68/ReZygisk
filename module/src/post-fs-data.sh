@@ -25,19 +25,22 @@ fi
 # INFO: As the active metamodule (metamodule=1 in module.prop), Hrezygisk is
 # responsible for mounting other modules' system/ dirs via overlay.
 #
-# metamount.sh stores its config/status/staging OUTSIDE /data/adb/rezygisk/
-# (at /data/adb/.rz_meta_*), so the rm -rf below does NOT affect it. We still
-# call metamount.sh BEFORE the rm -rf for ordering clarity — the overlay mounts
-# it creates must be in place before zygisk-ptrace starts.
+# IMPORTANT: Do NOT call metamount.sh from here. KernelSU/APatch invoke
+# metamount.sh DIRECTLY as the metamodule mount hook (after ALL post-fs-data.sh
+# scripts — both metamodule's and regular modules' — have run, and after
+# system.prop is loaded). This is the documented KSU boot sequence:
+#   1. post-fs-data.d scripts
+#   2. prune modules, restorecon, sepolicy
+#   3. metamodule's post-fs-data.sh   ← we are here
+#   4. regular modules' post-fs-data.sh
+#   5. load system.prop
+#   6. metamodule's metamount.sh      ← KSU calls this directly, ONCE
+#   7. post-mount.d
 #
-# Run metamount.sh only on KernelSU/APatch (where metamodule=1 is honored).
-# On Magisk this post-fs-data.sh is never invoked as a metamodule hook.
-#
-# We do NOT use `set -e` semantics here — metamount.sh failures must not abort
-# the rest of post-fs-data.sh (zygote still needs to start).
-if [ -f "$MODDIR/metamount.sh" ]; then
-  sh "$MODDIR/metamount.sh" || log -p w -t "zygisk-sh" "metamount.sh returned non-zero, continuing"
-fi
+# Calling metamount.sh here would run it at step 3 (too early — regular module
+# content may not be ready) AND KSU would call it again at step 6 (double exec
+# → second overlay over an already-overlaid /system fails). So metamount.sh is
+# intentionally NOT invoked from post-fs-data.sh.
 
 create_sys_perm() {
   mkdir -p $1

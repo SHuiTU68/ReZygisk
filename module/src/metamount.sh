@@ -73,22 +73,11 @@ else
   exit 0
 fi
 
-# INFO: Guard against double-execution in a single boot. KernelSU-Next calls
-# metamount.sh directly as a metamodule hook (with priority, before regular
-# module scripts); Hrezygisk's own post-fs-data.sh ALSO calls it. Running twice
-# is harmful: the second run would try to recreate the ext4 image that the
-# first run's overlay is backed by, breaking the mount. We use the kernel
-# boot_id as a per-boot sentinel stored OUTSIDE /data/adb/rezygisk/ (so it
-# survives post-fs-data.sh's rm -rf). The sentinel is written at the END of a
-# successful run, so early exits (disabled / no partitions) still allow a later
-# call to proceed — only an actual completed mount blocks re-entry.
-RZ_BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
-RZ_SENTINEL=/data/adb/.rz_meta_boot_sentinel
-if [ -n "$RZ_BOOT_ID" ] && [ -f "$RZ_SENTINEL" ] \
-   && [ "$(cat "$RZ_SENTINEL" 2>/dev/null)" = "$RZ_BOOT_ID" ]; then
-  _meta_log "metamount already completed this boot (boot_id=$RZ_BOOT_ID), skipping"
-  exit 0
-fi
+# INFO: This script is invoked ONCE by KernelSU/APatch as the metamodule mount
+# hook, AFTER all post-fs-data.sh scripts have run (see KSU boot sequence
+# documented in post-fs-data.sh). We do NOT need a double-execution guard —
+# KSU calls metamount.sh exactly once per boot. post-fs-data.sh no longer
+# calls this script.
 
 # INFO: Read user configuration. DEFAULT: enabled=false for safety.
 # User must explicitly enable via WebUI or install-time prompt.
@@ -217,7 +206,6 @@ source=$SOURCE
 mount_mode_stage=
 mounted_partitions=
 RASTAT_EMPTY
-  [ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
   exit 0
 fi
 
@@ -434,9 +422,18 @@ source=$SOURCE
 mount_mode_stage=$STAGE
 RASTAT
 
-# INFO: For each partition, merge whitelisted modules into upperdir and overlay
-# mount. As the active metamodule, this is OUR job — KSU/APatch do not mount
-# modules themselves when metamodule=1 is set.
+# INFO: For each partition, build the overlay with the correct lowerdir stack.
+# This follows the meta-overlayfs reference implementation:
+#   lowerdir = module1/system/$P : module2/system/$P : ... : /$P (real partition LAST)
+#   source   = "KSU"  (literal, so zygiskd umount_root() can detach for denylist)
+#   dest     = /$P    (mount ON TOP of the real partition)
+#
+# CRITICAL: the module content directories MUST be in lowerdir. Previously
+# lowerdir was ONLY /$P (the real partition), which stacked /system on itself —
+# the module files never entered the overlay, so modules did nothing. The cp of
+# module files into upperdir was also wrong: overlay reads lowerdir directly,
+# there is no need (and it's incorrect) to copy files into upperdir. upperdir
+# is only for runtime WRITES, which module mounts don't need.
 MOUNTED_PARTITIONS=""
 for P in $PARTITIONS; do
   lower="/$P"
@@ -447,6 +444,37 @@ for P in $PARTITIONS; do
   esac
   [ -d "$lower" ] || { _meta_log "skip $P: $lower not a dir"; continue; }
 
+  # INFO: Skip partitions that are symlinks (e.g. /vendor -> /system/vendor on
+  # some devices). Overlaying a symlink target double-mounts and can break.
+  # meta-overlayfs does the same check.
+  if [ -L "$lower" ]; then
+    _meta_log "skip $P: $lower is a symlink (already covered by another partition)"
+    continue
+  fi
+
+  # INFO: Build lowerdir stack: collect each whitelisted module's system/$P dir.
+  # The real partition /$P is ALWAYS the last (lowest) element so module files
+  # take precedence over the real system files.
+  lowerdirs=""
+  for mod in /data/adb/modules/*; do
+    _should_mount_module "$mod" || continue
+    src="$mod/system/$P"
+    [ -d "$src" ] || continue
+    lowerdirs="${lowerdirs}${lowerdirs:+:}$src"
+  done
+
+  # SAFETY: if no module has this partition, skip (shouldn't happen since
+  # PARTITIONS was derived from modules, but guard anyway).
+  [ -z "$lowerdirs" ] && { _meta_log "skip $P: no module provides system/$P"; continue; }
+
+  # Full lowerdir = module dirs : real partition (real partition LAST)
+  full_lower="${lowerdirs}:${lower}"
+
+  # INFO: Build mount options. We use an upperdir/workdir on /data so the
+  # overlay is writable (some modules/system code may write to /system at
+  # runtime; without upperdir the overlay is read-only and writes fail).
+  # For 'direct' mode upperdir is directly on /data; for tmpfs/ext4 modes
+  # upperdir is inside the staged tmpfs/ext4 image.
   if [ "$MOUNT_MODE" = "direct" ] || [ -z "$STAGE" ]; then
     upper="$RW_BASE/$P/upper"
     work="$RW_BASE/$P/work"
@@ -455,55 +483,36 @@ for P in $PARTITIONS; do
     work="$STAGE/.work/$P"
   fi
 
-  # SAFETY: upper/work MUST be non-empty absolute paths before any operation.
-  # An empty $upper here would turn "rm -rf $upper/*" into "rm -rf /*" which
-  # would destroy the filesystem. This is the critical safety guard.
+  # SAFETY: upper/work MUST be non-empty absolute paths.
   if [ -z "$upper" ] || [ -z "$work" ]; then
     _meta_log "FAIL $P: empty upper or work path, skipping"
     continue
   fi
-  case "$upper" in
-    /*) ;;
-    *) _meta_log "FAIL $P: upper not absolute: $upper"; continue;;
-  esac
-  case "$work" in
-    /*) ;;
-    *) _meta_log "FAIL $P: work not absolute: $work"; continue;;
-  esac
+  case "$upper" in /*) ;; *) _meta_log "FAIL $P: upper not absolute: $upper"; continue;; esac
+  case "$work" in /*) ;; *) _meta_log "FAIL $P: work not absolute: $work"; continue;; esac
 
   mkdir -p "$upper" "$work" 2>/dev/null || {
     _meta_log "FAIL $P: cannot create upper/work dir"
     continue
   }
 
-  # SAFETY: Only wipe upper if it's a real non-root absolute path with content.
-  # Double-check the path resolves under RW_BASE or STAGE before rm.
-  case "$upper" in
-    "$RW_BASE"/*|"$STAGE"/*)
-      if [ -n "$upper" ] && [ "$upper" != "/" ]; then
-        rm -rf "$upper"/* 2>/dev/null
-      fi
-      ;;
-    *)
-      _meta_log "FAIL $P: upper outside allowed prefix: $upper"
-      continue
-      ;;
-  esac
-
-  for mod in /data/adb/modules/*; do
-    _should_mount_module "$mod" || continue
-    src="$mod/system/$P"
-    [ -d "$src" ] || continue
-    if ! cp -a "$src/." "$upper/" 2>/dev/null; then
-      _meta_log "warn: merge failed for $src into $upper"
-    fi
-  done
-
-  if mount -t overlay -o "lowerdir=$lower,upperdir=$upper,workdir=$work" "$SOURCE" "$lower" 2>/dev/null; then
-    _meta_log "mounted overlay on $lower (source=$SOURCE mode=$MOUNT_MODE upper=$upper)"
+  # INFO: Attempt the overlay mount. source MUST be the literal "KSU" (or
+  # "APatch") so zygiskd's umount_root() can identify and detach these mounts
+  # for denylist apps. lowerdir lists module dirs first, real partition last.
+  if mount -t overlay -o "lowerdir=${full_lower},upperdir=${upper},workdir=${work}" "$SOURCE" "$lower" 2>/dev/null; then
+    _meta_log "mounted overlay on $lower (source=$SOURCE mode=$MOUNT_MODE lower=${full_lower})"
     MOUNTED_PARTITIONS="$MOUNTED_PARTITIONS $P"
   else
-    _meta_log "FAIL $P: mount -t overlay returned $?"
+    # Fallback: try read-only overlay without upperdir/workdir (some kernels
+    # reject upperdir on certain filesystems). Read-only overlay only needs
+    # lowerdir — module files are still applied.
+    _meta_log "overlay with upperdir failed, retrying read-only (lowerdir only)"
+    if mount -t overlay -o "lowerdir=${full_lower}" "$SOURCE" "$lower" 2>/dev/null; then
+      _meta_log "mounted READ-ONLY overlay on $lower (source=$SOURCE lower=${full_lower})"
+      MOUNTED_PARTITIONS="$MOUNTED_PARTITIONS $P"
+    else
+      _meta_log "FAIL $P: mount -t overlay returned $? (lower=${full_lower})"
+    fi
   fi
 done
 
@@ -514,11 +523,5 @@ mounted_partitions=$(echo $MOUNTED_PARTITIONS)
 RASTAT2
 
 _meta_log "metamount done (effective_mode=$MOUNT_MODE mounted=[$MOUNTED_PARTITIONS])"
-
-# INFO: Write the boot_id sentinel LAST, so only a fully-completed run (mounts
-# attempted on all partitions) marks this boot as done. Early exits (disabled /
-# no partitions / no SOURCE) do NOT write it, allowing a later invocation in the
-# same boot to proceed if conditions changed.
-[ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
 
 exit 0
