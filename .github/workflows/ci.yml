@@ -139,16 +139,55 @@ jobs:
             grep -n "nuke" common/modules.bzl | head -5
           fi
 
-      # INFO: Build via Kleaf. Use the standard kernel_aarch64_dist target
-      # (builds kernel + modules). The _modules-only target may not exist on
-      # all branches, so we go straight to _dist for reliability.
+      # INFO: Build via Kleaf. We use `bazel build` (not `run`) + manually copy
+      # the dist outputs. Log to file so exit code is preserved.
+      #
+      # Key points:
+      # - `tools/bazel` is the Kleaf wrapper (symlink created by repo sync).
+      #   If missing, fall back to `build/kernel/kleaf/build.sh`.
+      # - `--config=fast` is the standard Kleaf fast config.
+      # - We query available targets first to diagnose "target not found".
       - name: Build nuke.ko via Kleaf
         working-directory: android-kernel
         run: |
+          set -o pipefail
           mkdir -p dist
-          echo "=== Building kernel_aarch64_dist (this takes ~20min) ==="
-          tools/bazel run --config=fast --config=stamp --lto=thin \
-            //common:kernel_aarch64_dist -- --dist_dir=dist 2>&1 | tail -50
+
+          # Locate the bazel wrapper
+          BAZEL=""
+          if [ -x "tools/bazel" ]; then
+            BAZEL="tools/bazel"
+          elif [ -x "build/kernel/kleaf/build.sh" ]; then
+            BAZEL="build/kernel/kleaf/build.sh"
+          else
+            echo "=== ERROR: no bazel wrapper found ==="
+            echo "Looking for tools/bazel or build/kernel/kleaf/build.sh:"
+            ls -la tools/bazel 2>&1 || true
+            ls -la build/kernel/kleaf/ 2>&1 | head -10 || true
+            find . -maxdepth 3 -name "bazel" -o -name "build.sh" 2>/dev/null | head -10
+            exit 1
+          fi
+          echo "=== Using bazel wrapper: $BAZEL ==="
+
+          echo "=== Available kernel_aarch64 targets in //common: ==="
+          "$BAZEL" query 'attr(name, "kernel_aarch64.*", //common:*)' 2>&1 | head -20 || true
+
+          echo "=== Checking nuke_ext4_lkm registered in modules.bzl ==="
+          grep -rn "nuke" common/modules.bzl 2>/dev/null || echo "WARNING: nuke not in modules.bzl"
+
+          echo "=== Building //common:kernel_aarch64_dist (takes ~20min) ==="
+          "$BAZEL" build --config=fast --lto=thin //common:kernel_aarch64_dist 2>&1 | tee /tmp/bazel_build.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "=== bazel exit code: $BUILD_EXIT ==="
+          if [ "$BUILD_EXIT" != "0" ]; then
+            echo "=== BUILD FAILED. Last 100 lines of log: ==="
+            tail -100 /tmp/bazel_build.log
+            exit "$BUILD_EXIT"
+          fi
+
+          echo "=== Copying dist outputs ==="
+          "$BAZEL" run --config=fast --lto=thin //common:kernel_aarch64_dist -- --dist_dir=dist 2>&1 | tail -20 || true
+
           echo "=== Looking for nuke.ko in dist/ ==="
           find dist -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
           if [ ! -f dist/nuke.ko ]; then
