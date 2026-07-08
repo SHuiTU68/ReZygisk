@@ -7,231 +7,16 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
-    inputs:
-      skip_lkm:
-        description: "Skip nuke.ko source build (use prebuilt ko). Use when you only changed module/webui code."
-        required: false
-        default: false
-        type: boolean
 
 jobs:
-  # INFO: Build nuke.ko from source against AOSP android15-6.6 GKI kernel.
-  # Runs on EVERY CI run by default (push, PR, manual) so the module zip always
-  # contains a freshly-built ko. Pass skip_lkm=true on manual dispatch to skip
-  # when you only touched module/webui code and want a fast run.
-  # Approach: Kleaf's kernel_module() rule builds nuke.ko out-of-tree against
-  # //common:kernel_aarch64. This is the official Kleaf way — no kernel tree
-  # modification needed. Falls back to in-tree obj-m + full dist build if the
-  # kernel_module() rule is unavailable.
-  build-lkm:
-    name: Build nuke.ko
-    runs-on: ubuntu-latest
-    if: ${{ !((github.event_name == 'workflow_dispatch') && (inputs.skip_lkm == true)) }}
-    steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 20480
-          temp-reserve-mb: 4096
-          remove-dotnet: "true"
-          remove-android: "true"
-          remove-haskell: "true"
-          remove-codeql: "true"
-          remove-docker-images: "true"
-
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Install required packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev \
-            libelf-dev git python3 unzip wget cpio gcc-aarch64-linux-gnu llvm-15
-
-      # INFO: Clone AOSP GKI kernel source for android15-6.6.
-      # We use the Kleaf (Bazel) build system which requires the `common`
-      # kernel source + the `build/` project (tools/bazel wrapper).
-      #
-      # IMPORTANT: The manifest branch is `common-android15-6.6` (NOT -lts).
-      # The `-lts` variant has a different project layout that does not include
-      # a top-level `build` project, causing "project build not found" errors.
-      #
-      # We sync the full manifest (no project filter) because Kleaf needs
-      # multiple projects (common, build, prebuilts). Syncing only `common`
-      # + `build` fails because the manifest doesn't define `build` as a
-      # standalone project name in this branch.
-      #
-      # Optimization: --depth=1 + -c (only current branch) keeps it shallow.
-      # Retry logic handles transient Google server connection resets.
-      - name: Clone AOSP GKI kernel (android15-6.6)
-        run: |
-          set -e
-          mkdir -p android-kernel && cd android-kernel
-          echo "=== Disk space before clone ==="
-          df -h .
-          echo "Fetching GKI manifest branch: common-android15-6.6"
-          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > repo
-          chmod +x repo
-          # repo init with retries.
-          for attempt in 1 2 3; do
-            echo "=== repo init attempt $attempt ==="
-            if ./repo init -u https://android.googlesource.com/kernel/manifest \
-                -b common-android15-6.6 --depth=1; then
-              break
-            fi
-            echo "repo init attempt $attempt failed, retrying in 10s..."
-            [ "$attempt" = "3" ] && { echo "ERROR: repo init failed 3 times"; exit 1; }
-            rm -rf .repo
-            sleep 10
-          done
-          # Sync the full manifest. Kleaf needs common + build + prebuilts.
-          # Limit -j to 8 to avoid Google server connection resets.
-          for attempt in 1 2 3; do
-            echo "=== repo sync attempt $attempt ==="
-            if ./repo sync -c -j8 --force-sync; then
-              break
-            fi
-            echo "repo sync attempt $attempt failed, retrying in 15s..."
-            [ "$attempt" = "3" ] && { echo "ERROR: repo sync failed 3 times"; exit 1; }
-            sleep 15
-          done
-          echo "=== Disk space after clone ==="
-          df -h .
-          echo "=== Verifying build/ exists ==="
-          ls -la build/ 2>&1 | head -5 || { echo "ERROR: build/ dir missing"; exit 1; }
-          echo "=== Verifying common/ exists ==="
-          ls -la common/ 2>&1 | head -5 || { echo "ERROR: common/ dir missing"; exit 1; }
-
-      # INFO: Place nuke_ext4_lkm as an out-of-tree module at the workspace
-      # root. The BUILD.bazel in this directory uses Kleaf's kernel_module()
-      # rule to build nuke.ko against the GKI kernel WITHOUT modifying the
-      # kernel source tree.
-      #
-      # This replaces the old approach of:
-      #   - Moving source into common/drivers/nuke_ext4_lkm/
-      #   - Patching drivers/Makefile (obj-m) and drivers/Kconfig
-      #   - Patching modules.bzl (caused filegroup conflicts in BUILD.bazel)
-      #
-      # The kernel_module() rule is the official Kleaf way to build external
-      # modules. It builds just enough of the kernel (headers, scripts,
-      # Module.symvers) then compiles our module with `make M=`.
-      - name: Place nuke_ext4_lkm as out-of-tree module
-        working-directory: android-kernel
-        run: |
-          mv ../nuke_ext4_lkm nuke_ext4_lkm
-          echo "=== nuke_ext4_lkm contents ==="
-          ls -la nuke_ext4_lkm/
-          echo "=== BUILD.bazel ==="
-          cat nuke_ext4_lkm/BUILD.bazel
-
-      # INFO: Build nuke.ko via Kleaf's kernel_module() rule.
-      # Target: //nuke_ext4_lkm:nuke_ext4_lkm
-      # Output: bazel-bin/nuke_ext4_lkm/nuke.ko
-      #
-      # The rule depends on //common:kernel_aarch64 (the GKI kernel build),
-      # so Bazel will build the kernel first, then our module. This takes
-      # ~15-20 min on the first run but is the correct, non-hacky approach.
-      #
-      # Fallback: if kernel_module() is unavailable or the target fails, we
-      # fall back to the in-tree approach (move into common/drivers/, add
-      # obj-m, build //common:kernel_aarch64_dist).
-      - name: Build nuke.ko via Kleaf
-        working-directory: android-kernel
-        run: |
-          set -o pipefail
-          mkdir -p dist
-
-          BAZEL="tools/bazel"
-          [ -x "$BAZEL" ] || BAZEL="build/kernel/kleaf/build.sh"
-          [ -x "$BAZEL" ] || { echo "ERROR: no bazel wrapper found"; exit 1; }
-          echo "=== Using bazel wrapper: $BAZEL ==="
-
-          # Debug: list available kernel_aarch64 targets in //common:
-          echo "=== kernel_aarch64 targets in //common: ==="
-          "$BAZEL" query 'attr(name, "kernel_aarch64", //common:*)' 2>&1 | sort -u || true
-
-          # Primary: out-of-tree module build via kernel_module() rule.
-          echo "=== Building //nuke_ext4_lkm:nuke_ext4_lkm (out-of-tree) ==="
-          "$BAZEL" build --config=fast --lto=thin //nuke_ext4_lkm:nuke_ext4_lkm 2>&1 | tee /tmp/bazel_build.log
-          BUILD_EXIT=${PIPESTATUS[0]}
-          echo "=== bazel exit code: $BUILD_EXIT ==="
-
-          if [ "$BUILD_EXIT" = "0" ]; then
-            echo "=== Out-of-tree build succeeded. Looking for nuke.ko ==="
-            find bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
-          else
-            echo "=== Out-of-tree build failed (exit $BUILD_EXIT). Last 80 lines: ==="
-            tail -80 /tmp/bazel_build.log
-            echo ""
-            echo "=== Falling back to in-tree approach ==="
-
-            # Move module into the kernel tree and wire it via obj-m.
-            mv nuke_ext4_lkm common/drivers/nuke_ext4_lkm
-            sed -i 's/endmenu//g' common/drivers/Kconfig
-            echo 'source "drivers/nuke_ext4_lkm/Kconfig"' >> common/drivers/Kconfig
-            echo 'endmenu' >> common/drivers/Kconfig
-            echo 'obj-m += nuke_ext4_lkm/' >> common/drivers/Makefile
-            # Relax unknown-symbol abort (kallsyms_lookup_name via kprobe).
-            sed -i 's/needs unknown symbol/Dont abort when unknown symbol/g' build/kernel/*.sh 2>/dev/null || true
-
-            # Try the full kernel dist build (no modules.bzl patch — that
-            # caused filegroup conflicts).
-            TARGET=""
-            for t in kernel_aarch64_dist kernel_aarch64; do
-              if "$BAZEL" query "//common:$t" >/dev/null 2>&1; then
-                TARGET="//common:$t"
-                break
-              fi
-            done
-            if [ -z "$TARGET" ]; then
-              echo "=== ERROR: no kernel_aarch64 build target found ==="
-              exit 1
-            fi
-            echo "=== Fallback: building $TARGET ==="
-            "$BAZEL" build --config=fast --lto=thin "$TARGET" 2>&1 | tee /tmp/bazel_build2.log
-            BUILD_EXIT=${PIPESTATUS[0]}
-            echo "=== fallback bazel exit code: $BUILD_EXIT ==="
-            if [ "$BUILD_EXIT" != "0" ]; then
-              echo "=== FALLBACK BUILD FAILED. Last 100 lines: ==="
-              tail -100 /tmp/bazel_build2.log
-              exit "$BUILD_EXIT"
-            fi
-            # For _dist targets, run to copy outputs.
-            if [[ "$TARGET" == *"dist"* ]]; then
-              "$BAZEL" run --config=fast --lto=thin "$TARGET" -- --dist_dir=dist 2>&1 | tail -20 || true
-            fi
-            find dist bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \; 2>/dev/null
-          fi
-
-          test -f dist/nuke.ko || { echo "ERROR: nuke.ko not found anywhere"; exit 1; }
-          echo "=== nuke.ko found ==="
-          ls -la dist/nuke.ko
-
-      - name: Verify nuke.ko
-        run: |
-          ls -la android-kernel/dist/nuke.ko
-          file android-kernel/dist/nuke.ko
-          sha256sum android-kernel/dist/nuke.ko
-
-      - name: Upload nuke.ko
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuke-ko
-          path: android-kernel/dist/nuke.ko
-          if-no-files-found: error
-          retention-days: 30
-
-  # INFO: Build the Hrezygisk module zip. Depends on build-lkm so the freshly
-  # built ko gets baked into the zip. If build-lkm was skipped (manual
-  # skip_lkm=true), the prebuilt module/src/lkm/nuke.ko is used instead.
+  # INFO: Build the Hrezygisk module zip. Uses the prebuilt nuke.ko from
+  # mountify (module/src/lkm/nuke.ko, kernel 6.6 / Android 15, aarch64).
+  # We no longer build the ko from source in CI — the Kleaf kernel_module()
+  # approach kept failing (make: No targets), and maintaining an AOSP kernel
+  # clone + Bazel build just for one ko was too heavy. The prebuilt ko works
+  # on all Android 15 / 6.6 GKI devices.
   build:
     name: Build (${{ matrix.build_type }})
-    needs: build-lkm
-    # INFO: Run module build when build-lkm succeeded OR was skipped.
-    # If build-lkm failed, skip the module build (no fresh ko to embed).
-    if: ${{ always() && (needs.build-lkm.result == 'success' || needs.build-lkm.result == 'skipped') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -253,27 +38,11 @@ jobs:
       - name: Setup NDK_PATH
         run: echo "NDK_PATH=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
 
-      # INFO: If build-lkm ran and produced a fresh nuke.ko, download it and
-      # overwrite the prebuilt ko before building the module zip.
-      - name: Download freshly built nuke.ko (if available)
-        if: needs.build-lkm.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: nuke-ko
-          path: module/src/lkm/
-
-      - name: Rename downloaded ko to nuke.ko
-        if: needs.build-lkm.result == 'success'
+      - name: Verify prebuilt nuke.ko
         run: |
-          # The artifact may be named differently; ensure it's nuke.ko.
-          cd module/src/lkm
-          for f in *.ko; do
-            if [ "$f" != "nuke.ko" ]; then
-              mv "$f" nuke.ko
-            fi
-          done
-          ls -la nuke.ko
-          file nuke.ko
+          ls -la module/src/lkm/nuke.ko
+          file module/src/lkm/nuke.ko
+          sha256sum module/src/lkm/nuke.ko
 
       - name: Build
         run: make ${{ matrix.build_type }} -j$(nproc)
