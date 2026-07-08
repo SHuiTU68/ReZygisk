@@ -365,6 +365,10 @@ if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$M
         fi
         kptr_set=$(cat /proc/sys/kernel/kptr_restrict)
         echo 1 > /proc/sys/kernel/kptr_restrict
+        # INFO: The improved nuke.ko auto-resolves ext4_unregister_sysfs via
+        # kallsyms_lookup_name (kprobe trick on >= 5.7). We still grep the
+        # address as a fallback and pass it via symaddr — if kallsyms_lookup_name
+        # is unavailable, the ko uses symaddr instead.
         ptr_address=$(grep " ext4_unregister_sysfs$" /proc/kallsyms | awk {'print "0x"$1'})
         echo "$DMESG_PREFIX: stage2/ext4: loading LKM with mount_point=$mnt symaddr=$ptr_address" >> /dev/kmsg
         if insmod "$MODDIR/lkm/$lkm_filename" mount_point="$mnt" symaddr="$ptr_address" 2>>"$LOG_FOLDER/nuke_err"; then
@@ -372,6 +376,7 @@ if [ ! -f "$MODDIR/ksud_has_nuke_ext4" ] && [ $enable_lkm_nuke = 1 ] && [ -f "$M
                 echo "$DMESG_PREFIX: stage2/ext4: LKM loaded, nuked $mnt" >> /dev/kmsg
         else
                 echo "$DMESG_PREFIX: stage2/ext4: LKM load FAILED for $mnt" >> /dev/kmsg
+                cat "$LOG_FOLDER/nuke_err" >> /dev/kmsg
         fi
         echo $kptr_set > /proc/sys/kernel/kptr_restrict
 

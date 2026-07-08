@@ -7,10 +7,135 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
+    inputs:
+      rebuild_lkm:
+        description: "Rebuild nuke.ko from source (slow, ~30min). Default uses cached/prebuilt ko."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
+  # INFO: Build nuke.ko from source against AOSP android15-6.6-lts GKI kernel.
+  # This job is OPTIONAL — it only runs when:
+  #   1. nuke_ext4_lkm source changes (path filter), OR
+  #   2. manually triggered with rebuild_lkm=true
+  # Otherwise the prebuilt module/src/lkm/nuke.ko is used directly.
+  # Optimization: only build the kernel_aarch64_modules target (not the full
+  # kernel image), which skips vmlinux/boot.img and cuts build time ~40%.
+  build-lkm:
+    name: Build nuke.ko
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && inputs.rebuild_lkm == true ||
+      github.event_name == 'push' &&
+        contains(toJSON(github.event.commits.*.modified), 'nuke_ext4_lkm/')
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 10240
+          temp-reserve-mb: 4096
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev \
+            libelf-dev git python3 unzip wget cpio gcc-aarch64-linux-gnu llvm-15
+
+      # INFO: Shallow clone only the manifest + common project (depth=1).
+      # Skip prebuilts build tools to save ~20GB sync time; Bazel will fetch
+      # only the build tools it actually needs on demand.
+      - name: Clone AOSP GKI kernel (android15-6.6)
+        run: |
+          mkdir android-kernel && cd android-kernel
+          echo "Fetching GKI manifest branch: common-android15-6.6-lts"
+          curl https://storage.googleapis.com/git-repo-downloads/repo > repo
+          chmod +x repo
+          ./repo init --manifest-depth=1 --depth=1 \
+            https://android.googlesource.com/kernel/manifest -b common-android15-6.6-lts
+          # Sync only what we need: common + build. Skip prebuilts/ to save
+          # ~20GB; bazel will lazy-fetch required build tools.
+          ./repo sync -c -j$(nproc) common build
+          rm -rf .repo
+
+      - name: Prepare GKI and inject nuke_ext4_lkm
+        working-directory: android-kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=clang
+
+          cd common
+          # Inject our nuke_ext4_lkm source into the kernel tree.
+          mv ../../nuke_ext4_lkm drivers/nuke_ext4_lkm
+
+          # Wire it into Kconfig / Makefile.
+          sed -i 's/endmenu//g' drivers/Kconfig
+          echo 'source "drivers/nuke_ext4_lkm/Kconfig"' >> drivers/Kconfig
+          echo 'endmenu' >> drivers/Kconfig
+          echo 'obj-y += nuke_ext4_lkm/' >> drivers/Makefile
+
+          # Patch modules.bzl so bazel builds + ships nuke.ko, and relax the
+          # "needs unknown symbol" check caused by MODULE_IMPORT_NS.
+          cd ..
+          sed -i 's/needs unknown symbol/Dont abort when unknown symbol/g' build/kernel/*.sh 2>/dev/null || true
+          if [ -e common/modules.bzl ]; then
+            sed -i 's/_COMMON_GKI_MODULES_LIST = \[/_COMMON_GKI_MODULES_LIST = \[ "drivers\/nuke_ext4_lkm\/nuke.ko",/g' common/modules.bzl
+          fi
+
+      # INFO: Optimization — build ONLY the modules target, not the full
+      # kernel image. This skips vmlinux, boot.img, and cuts ~40% of build
+      # time. Falls back to _dist if _modules target doesn't exist.
+      - name: Build nuke.ko via Kleaf
+        working-directory: android-kernel
+        run: |
+          mkdir -p dist
+          # Try the modules-only target first (much faster — no vmlinux).
+          if tools/bazel build --config=fast --lto=thin //common:kernel_aarch64_modules 2>&1; then
+            echo "modules target built, locating nuke.ko..."
+            find bazel-bin -name "nuke.ko" -exec cp {} dist/nuke.ko \;
+          else
+            echo "modules target failed, falling back to full dist..."
+            tools/bazel run --config=fast --config=stamp --lto=thin \
+              //common:kernel_aarch64_dist -- --dist_dir=dist
+          fi
+          test -f dist/nuke.ko || { echo "ERROR: nuke.ko not found"; exit 1; }
+
+      - name: Verify nuke.ko
+        run: |
+          ls -la android-kernel/dist/nuke.ko
+          file android-kernel/dist/nuke.ko
+          sha256sum android-kernel/dist/nuke.ko
+
+      - name: Upload nuke.ko
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuke-ko
+          path: android-kernel/dist/nuke.ko
+          if-no-files-found: error
+          retention-days: 30
+
+  # INFO: Build the Hrezygisk module zip. Depends on build-lkm so the freshly
+  # built ko gets baked into the zip. If build-lkm was skipped (no source
+  # change + no manual trigger), the prebuilt module/src/lkm/nuke.ko is used.
   build:
     name: Build (${{ matrix.build_type }})
+    needs: build-lkm
+    # INFO: Always run the module build, even if build-lkm was skipped
+    # (build-lkm is conditional). use if: always() + success() to inherit
+    # the result of build-lkm when it ran.
+    if: ${{ always() && (needs.build-lkm.result == 'success' || needs.build-lkm.result == 'skipped') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,6 +156,28 @@ jobs:
 
       - name: Setup NDK_PATH
         run: echo "NDK_PATH=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+
+      # INFO: If build-lkm ran and produced a fresh nuke.ko, download it and
+      # overwrite the prebuilt ko before building the module zip.
+      - name: Download freshly built nuke.ko (if available)
+        if: needs.build-lkm.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: nuke-ko
+          path: module/src/lkm/
+
+      - name: Rename downloaded ko to nuke.ko
+        if: needs.build-lkm.result == 'success'
+        run: |
+          # The artifact may be named differently; ensure it's nuke.ko.
+          cd module/src/lkm
+          for f in *.ko; do
+            if [ "$f" != "nuke.ko" ]; then
+              mv "$f" nuke.ko
+            fi
+          done
+          ls -la nuke.ko
+          file nuke.ko
 
       - name: Build
         run: make ${{ matrix.build_type }} -j$(nproc)
