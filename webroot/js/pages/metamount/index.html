@@ -45,8 +45,8 @@
         <input id="ma_fake_name_input" type="text" class="dimc" style="margin: 8px 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #ccc); background: var(--bg-color, #fff); color: var(--text-primary, #333); font-size: 0.9em; width: calc(100% - 24px);" placeholder="{{settings.fakeName.placeholder}}">
       </div>
 
-      <!-- SAFETY: Partition allow list. All critical partitions are excluded by
-           default. User must explicitly toggle each one to allow overlay. -->
+      <!-- INFO: Partition list. All partitions referenced by checked modules
+           are mounted by default. User can uncheck to exclude a partition. -->
       <div class="small_card dimc" style="margin-bottom: 0;">
         <div class="action_card">
           <div class="dimc content action_card_title">{{partitions.title}}</div>

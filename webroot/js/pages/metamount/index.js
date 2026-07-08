@@ -18,7 +18,11 @@ const MetaMountState = {
   mountMode: 'auto',
   effectiveMode: '',
   fakeName: 'rezygisk',
-  allowedPartitions: [],
+  // INFO: excludedPartitions is a BLACKLIST of partitions the user has
+  // unchecked. By default all discovered partitions are mounted (empty
+  // exclude list = mount all). This replaces the old allowedPartitions
+  // permit model where dangerous partitions needed explicit opt-in.
+  excludedPartitions: [],
   includeModules: [],
   availableModules: [],
   discoveredPartitions: []
@@ -56,17 +60,19 @@ async function _loadMetaStatus() {
 //   enabled=true|false
 //   mount_mode=auto|tmpfs|ext4|direct
 //   fake_mount_name=rezygisk
-//   allow_partitions="system vendor product"  (space or comma separated)
-//   include_modules="id1 id2 id3"             (whitelist of modules to mount)
+//   exclude_partitions="product"             (blacklist; empty = mount all)
+//   include_modules="id1 id2 id3"            (whitelist of modules to mount)
 // Missing or malformed file => defaults (all disabled for safety).
 // For backward compatibility, skip_modules (old blacklist) is parsed and
 // inverted into includeModules (all modules EXCEPT those in skip_modules).
+// For backward compatibility, allow_partitions (old permit list) is ignored —
+// under the new model all partitions mount by default.
 async function _loadMetaCfg() {
   MetaMountState.includeModules = []
   MetaMountState.metaEnabled = false
   MetaMountState.mountMode = 'auto'
   MetaMountState.fakeName = 'rezygisk'
-  MetaMountState.allowedPartitions = []
+  MetaMountState.excludedPartitions = []
   let legacySkipModules = null
   const r = await exec(`cat ${MA_CFG_PATH} 2>/dev/null`)
   if (r.errno !== 0) return
@@ -76,9 +82,9 @@ async function _loadMetaCfg() {
       MetaMountState.includeModules = im[1].split(/[\s,]+/).filter(Boolean)
       return
     }
-    const ap = line.match(/^allow_partitions="(.*)"$/)
-    if (ap) {
-      MetaMountState.allowedPartitions = ap[1].split(/[\s,]+/).filter(Boolean)
+    const ep = line.match(/^exclude_partitions="(.*)"$/)
+    if (ep) {
+      MetaMountState.excludedPartitions = ep[1].split(/[\s,]+/).filter(Boolean)
       return
     }
     const em = line.match(/^enabled=(.+)$/)
@@ -105,6 +111,8 @@ async function _loadMetaCfg() {
     if (sm) {
       legacySkipModules = sm[1].split(/[\s,]+/).filter(Boolean)
     }
+    // NOTE: allow_partitions (old permit list) is intentionally NOT parsed —
+    // it no longer has any effect under the auto-mount model.
   })
   // Stash legacy skip list for inversion during _loadAvailableModules
   MetaMountState._legacySkipModules = legacySkipModules
@@ -170,7 +178,7 @@ async function _loadAvailableModules() {
 // quote-breaking: only safe characters are allowed.
 function _writeMetaCfg() {
   const includeList = MetaMountState.includeModules.filter(Boolean).join(' ')
-  const allowList = MetaMountState.allowedPartitions.filter(Boolean).join(' ')
+  const excludeList = MetaMountState.excludedPartitions.filter(Boolean).join(' ')
   const enabled = MetaMountState.metaEnabled ? 'true' : 'false'
   const mode = MetaMountState.mountMode
   const name = (MetaMountState.fakeName || 'rezygisk').replace(/[^A-Za-z0-9_]/g, '') || 'rezygisk'
@@ -178,9 +186,9 @@ function _writeMetaCfg() {
   // dot, space (for the space-separated lists). This prevents shell metachar
   // injection and quote-breaking in the printf argument.
   const safeInclude = includeList.replace(/[^A-Za-z0-9_ .\-]/g, '')
-  const safeAllow = allowList.replace(/[^A-Za-z0-9_ .\-]/g, '')
+  const safeExclude = excludeList.replace(/[^A-Za-z0-9_ .\-]/g, '')
   // Build file content with \n that printf '%b' will expand.
-  const content = `enabled=${enabled}\\nmount_mode=${mode}\\nfake_mount_name=${name}\\nallow_partitions="${safeAllow}"\\ninclude_modules="${safeInclude}"\\n`
+  const content = `enabled=${enabled}\\nmount_mode=${mode}\\nfake_mount_name=${name}\\nexclude_partitions="${safeExclude}"\\ninclude_modules="${safeInclude}"\\n`
   return exec(`mkdir -p /data/adb && printf '%b' '${content}' > ${MA_CFG_PATH}`)
 }
 
@@ -205,15 +213,15 @@ function _syncUI() {
   if (nameInput) nameInput.value = MetaMountState.fakeName
 
   // INFO: Show the effective mode (actual mode after boot probe) when it
-  // differs from the configured mode. E.g. configured "auto" → effective
-  // "ext4" displays "auto → ext4".
+  // differs from the configured mode. E.g. configured "auto" resolved to
+  // "ext4" displays "auto (ext4)" — same format as the home page.
   const effEl = document.getElementById('ma_effective_mode')
   if (effEl) {
     if (MetaMountState.effectiveMode &&
         MetaMountState.effectiveMode !== MetaMountState.mountMode &&
         MetaMountState.metaEnabled) {
       effEl.style.display = 'block'
-      effEl.innerText = `${MetaMountState.mountMode} → ${MetaMountState.effectiveMode}`
+      effEl.innerText = `${MetaMountState.mountMode} (${MetaMountState.effectiveMode})`
     } else {
       effEl.style.display = 'none'
     }
@@ -274,9 +282,11 @@ function _renderModuleList() {
   }
 }
 
-// INFO: Build the partition allow list DOM. Each discovered partition gets a
-// toggle. A checked toggle means the partition IS in allow_partitions (i.e.
-// explicitly allowed to be overlaid despite being dangerous).
+// INFO: Build the partition list DOM. Each discovered partition gets a toggle.
+// CHECKED = will be mounted (default). UNCHECKED = added to exclude_partitions
+// blacklist and NOT mounted. This is the inverse of the old allow model: every
+// partition a selected module references is mounted by default, and the user
+// unchecks only the ones they want to suppress.
 function _renderPartitionList() {
   const listEl = document.getElementById('ma_partition_list')
   const noPartEl = document.getElementById('ma_no_partitions')
@@ -296,7 +306,7 @@ function _renderPartitionList() {
   if (noPartEl) noPartEl.style.display = 'none'
 
   for (const part of MetaMountState.discoveredPartitions) {
-    const allowed = MetaMountState.allowedPartitions.includes(part)
+    const mounted = !MetaMountState.excludedPartitions.includes(part)
     const card = document.createElement('div')
     card.className = 'small_card dimc'
     card.style.marginBottom = '0'
@@ -311,15 +321,17 @@ function _renderPartitionList() {
       </label>
     `
     const cb = card.querySelector('input[type="checkbox"]')
-    cb.checked = allowed
+    cb.checked = mounted
     cb.addEventListener('change', () => {
       const p = cb.getAttribute('data-ma-part')
       if (cb.checked) {
-        if (!MetaMountState.allowedPartitions.includes(p)) {
-          MetaMountState.allowedPartitions.push(p)
-        }
+        // remove from exclude blacklist → will be mounted
+        MetaMountState.excludedPartitions = MetaMountState.excludedPartitions.filter((x) => x !== p)
       } else {
-        MetaMountState.allowedPartitions = MetaMountState.allowedPartitions.filter((x) => x !== p)
+        // add to exclude blacklist → will NOT be mounted
+        if (!MetaMountState.excludedPartitions.includes(p)) {
+          MetaMountState.excludedPartitions.push(p)
+        }
       }
       _writeMetaCfg()
     })

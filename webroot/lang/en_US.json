@@ -96,7 +96,7 @@
     "metamount": {
       "title": "Meta Mount",
       "notActive": "Metamodule is not active. Install on KernelSU or APatch to enable.",
-      "note": "Changes take effect on next reboot. No module is mounted by default — check the modules you want to mount, and enable the partitions they need.",
+      "note": "Changes take effect on next reboot. No module is mounted by default — check the modules you want to mount; all their partitions are mounted automatically.",
       "settings": {
         "enabled": {
           "title": "Enable Meta Mount",
@@ -117,10 +117,10 @@
         }
       },
       "partitions": {
-        "title": "Partition Allow List (DANGEROUS)",
-        "description": "All system partitions are excluded by default to prevent bootloops. Toggle a partition to explicitly allow overlaying it. WARNING: enabling any of these can cause bootloops, black screens, or hot reboots.",
+        "title": "Mounted Partitions",
+        "description": "All partitions referenced by checked modules are mounted by default. Uncheck a partition to prevent it from being overlaid.",
         "noPartitions": "No partitions discovered from installed modules.",
-        "note": "As the active metamodule, Hrezygisk handles module mounting itself. All system partitions are excluded by default — enable the ones your selected modules need."
+        "note": "Partitions are auto-detected from the selected modules' system/ directory. Uncheck to exclude a partition."
       },
       "exclusions": {
         "title": "Modules to Mount",

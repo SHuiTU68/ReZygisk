@@ -21,12 +21,16 @@
 # overlaid. This is safer than a blacklist and matches the WebUI "select which
 # modules to mount" UX.
 #
-# SAFETY: Critical Android partitions (system, vendor, product, system_ext,
-# odm, ...) are in DANGEROUS_PARTITIONS and excluded by default. The user must
-# explicitly allow each partition via allow_partitions= to overlay it. This is
-# the primary bootloop prevention — overlaying /system at post-fs-data can
-# break system_server/zygote if the upperdir is not fully visible to all
-# processes at that early stage.
+# PARTITION SELECTION: A mounted module's partitions are derived from its
+# system/ directory — every top-level entry (system, vendor, product, ...) is
+# a partition that module wants to overlay. Since the user explicitly chose to
+# mount the module, the partitions it needs are mounted UNCONDITIONALLY. There
+# is no longer a DANGEROUS_PARTITIONS gate — the old allow_partitions permit
+# model fought the whitelist model: a user would tick a module in the WebUI
+# but the module silently did nothing because its /system partition was
+# "dangerous" and not separately allowed. Choosing the module IS the consent.
+# (allow_partitions is still read for backward compat but no longer gates
+# anything; an OPTIONAL restrict_partitions= may limit which partitions mount.)
 #
 # Three mount backends (inspired by mountify):
 #   tmpfs — stage on /mnt/vendor/<name> tmpfs, hardest to detect
@@ -131,45 +135,47 @@ _should_mount_module() {
   return 1
 }
 
-# INFO: allow_partitions is a comma-separated (or space-separated) list of
-# partitions the user has explicitly allowed to be overlaid despite being in
-# DANGEROUS_PARTITIONS. Default empty = no dangerous partitions are overlaid.
-#
-# For backward compatibility, allow_system=true is treated as
-# allow_partitions=system.
+# INFO: allow_partitions is kept ONLY for backward compatibility with existing
+# config files written by older builds / the WebUI. It no longer gates any
+# partition — choosing a module in include_modules is sufficient consent. We
+# still log it so old configs don't break and the value is traceable in logs.
 ALLOW_PARTITIONS=""
 if [ -f "$CFG" ]; then
   _ap=$(grep '^allow_partitions=' "$CFG" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr ',' ' ')
-  if [ -n "$_ap" ]; then
-    ALLOW_PARTITIONS="$_ap"
-  fi
-  # Legacy: allow_system=true => allow system partition
-  if grep -q '^allow_system=true' "$CFG" 2>/dev/null; then
-    case " $ALLOW_PARTITIONS " in
-      *" system "*) ;;
-      *) ALLOW_PARTITIONS="$ALLOW_PARTITIONS system";;
-    esac
-  fi
+  [ -n "$_ap" ] && ALLOW_PARTITIONS="$_ap"
+  # Legacy: allow_system=true => allow system partition (now a no-op but parsed)
+  grep -q '^allow_system=true' "$CFG" 2>/dev/null && ALLOW_PARTITIONS="$ALLOW_PARTITIONS system"
 fi
-_meta_log "allow_partitions=[$ALLOW_PARTITIONS]"
+_meta_log "allow_partitions=[$ALLOW_PARTITIONS] (legacy, no longer gates mounting)"
 
-# SAFETY: DANGEROUS_PARTITIONS contains ALL critical Android system partitions
-# that are known to cause bootloops when overlaid at post-fs-data. Overlaying
-# any of these can break system_server, zygote, surfaceflinger, vold, or
-# SystemUI, causing black screen → hot reboot → bootloop.
-DANGEROUS_PARTITIONS="system vendor product system_ext odm vendor_dlkm system_dlkm miui oppo my_preload my_region my_product my_stock my_engineering"
+# INFO: Optional exclude_partitions — a blacklist of partitions the user has
+# unchecked in the WebUI. Partitions in this list are NOT mounted even if a
+# selected module references them. Empty (default) = mount ALL partitions the
+# included modules reference. This is the clean inverse of the old
+# allow_partitions permit model and matches the WebUI "checked = mount" UX
+# (all partitions checked by default, uncheck to exclude).
+EXCLUDE_PARTITIONS=""
+if [ -f "$CFG" ]; then
+  _ep=$(grep '^exclude_partitions=' "$CFG" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr ',' ' ')
+  [ -n "$_ep" ] && EXCLUDE_PARTITIONS="$_ep"
+fi
+[ -n "$EXCLUDE_PARTITIONS" ] && _meta_log "exclude_partitions=[$EXCLUDE_PARTITIONS] (these will NOT mount)"
 
-# INFO: Check if a partition name is in the allow list.
-_is_partition_allowed() {
-  _pn="$1"
-  case " $ALLOW_PARTITIONS " in
-    *" $_pn "*) return 0;;
+# INFO: Check if a partition is excluded by the user's blacklist.
+_is_partition_excluded() {
+  case " $EXCLUDE_PARTITIONS " in
+    *" $1 "*) return 0;;
     *) return 1;;
   esac
 }
 
 # INFO: Collect partitions to overlay. Only top-level entries under system/.
 # Only partitions referenced by whitelisted modules are considered.
+# NOTE: partitions are NO LONGER filtered by DANGEROUS_PARTITIONS. The user
+# explicitly opted each module in via include_modules, so every partition that
+# module ships under system/ is mounted. This fixes the bug where a module
+# modifying /system was selected but silently did nothing because "system" was
+# dangerous and not separately allowed.
 PARTITIONS=""
 for mod in /data/adb/modules/*; do
   _should_mount_module "$mod" || continue
@@ -181,17 +187,10 @@ for mod in /data/adb/modules/*; do
       ""|*..*|*/*) continue;;
     esac
 
-    # SAFETY: Skip dangerous partitions unless explicitly allowed by user.
-    _is_dangerous=false
-    case " $DANGEROUS_PARTITIONS " in
-      *" $pname "*) _is_dangerous=true;;
-    esac
-    if [ "$_is_dangerous" = "true" ]; then
-      if ! _is_partition_allowed "$pname"; then
-        _meta_log "skip dangerous partition: $pname (add to allow_partitions to override)"
-        continue
-      fi
-      _meta_log "WARNING: mounting dangerous partition $pname (user explicitly allowed)"
+    # INFO: respect user's exclude blacklist (unchecked in WebUI)
+    if _is_partition_excluded "$pname"; then
+      _meta_log "skip $pname: in exclude_partitions blacklist"
+      continue
     fi
 
     case " $PARTITIONS " in
@@ -203,8 +202,24 @@ done
 
 _meta_log "partitions discovered:[$PARTITIONS]"
 
-# SAFETY: If no partitions, nothing to do. Avoid any mount operations.
-[ -z "$PARTITIONS" ] && { _meta_log "no partitions to mount (no whitelisted modules or all partitions excluded), exiting"; exit 0; }
+# INFO: If no partitions need mounting, we still MUST write the status file so
+# the WebUI/home page can show the (effective) mode and "no partitions" state.
+# Previously this branch exit-0'd without writing STATUS, which left the WebUI
+# unable to display the effective mode after "auto" — the user saw no suffix
+# even though metamount had run. Now we write STATUS with effective=configured
+# (no probe needed since nothing mounts) and record empty mounted_partitions.
+if [ -z "$PARTITIONS" ]; then
+  _meta_log "no partitions to mount (no whitelisted modules), writing status and exiting"
+  cat > "$STATUS" <<RASTAT_EMPTY
+configured_mode=$MOUNT_MODE
+effective_mode=$MOUNT_MODE
+source=$SOURCE
+mount_mode_stage=
+mounted_partitions=
+RASTAT_EMPTY
+  [ -n "$RZ_BOOT_ID" ] && echo "$RZ_BOOT_ID" > "$RZ_SENTINEL" 2>/dev/null
+  exit 0
+fi
 
 _try_setup_tmpfs() {
   STAGE="/mnt/vendor/$FAKE_MOUNT_NAME"

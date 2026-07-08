@@ -256,15 +256,12 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
   # flagged. This auto-populates include_modules so the user doesn't have to
   # manually toggle every module in the WebUI after install.
   #
-  # Also auto-populate allow_partitions from the partitions those modules
-  # reference under system/ (e.g. system, vendor). This is convenient but
-  # DANGEROUS: mounting system/vendor at post-fs-data can bootloop. We still
-  # do it because if the user enabled metamount, they presumably want their
-  # modules mounted — and a module that ships system/ files clearly expects
-  # that partition to be overlaid. The user can disable specific partitions
-  # in the WebUI afterwards.
+  # Partitions are NOT pre-selected here — under the new model, every partition
+  # referenced by an included module is mounted by default (empty
+  # exclude_partitions). The user can uncheck specific partitions in the WebUI
+  # afterwards if needed. We still discover partitions here only for display.
   META_INCLUDE_MODULES=""
-  META_ALLOW_PARTITIONS=""
+  META_DISCOVERED_PARTITIONS=""
   if [ "$META_ENABLED" = "true" ]; then
     ui_print ""
     ui_print " 自动识别需要挂载的模块..."
@@ -277,29 +274,29 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
       # Don't mount ourselves
       [ "$_modid" = "rezygisk" ] && continue
       META_INCLUDE_MODULES="$META_INCLUDE_MODULES $_modid"
-      # Collect partitions this module references
+      # Discover partitions this module references (display only)
       for _entry in "$_mod"/system/*; do
         [ -e "$_entry" ] || continue
         _pname=$(basename "$_entry")
         case "$_pname" in
           ""|*..*|*/*) continue;;
         esac
-        case " $META_ALLOW_PARTITIONS " in
+        case " $META_DISCOVERED_PARTITIONS " in
           *" $_pname "*) ;;
-          *) META_ALLOW_PARTITIONS="$META_ALLOW_PARTITIONS $_pname";;
+          *) META_DISCOVERED_PARTITIONS="$META_DISCOVERED_PARTITIONS $_pname";;
         esac
       done
     done
     # Trim leading spaces
     META_INCLUDE_MODULES=$(echo $META_INCLUDE_MODULES)
-    META_ALLOW_PARTITIONS=$(echo $META_ALLOW_PARTITIONS)
+    META_DISCOVERED_PARTITIONS=$(echo $META_DISCOVERED_PARTITIONS)
     if [ -n "$META_INCLUDE_MODULES" ]; then
       ui_print "  识别到 $(echo $META_INCLUDE_MODULES | wc -w) 个模块:"
       for _m in $META_INCLUDE_MODULES; do
         ui_print "    - $_m"
       done
-      ui_print "  涉及分区: $META_ALLOW_PARTITIONS"
-      ui_print "  (可在 WebUI 中调整)"
+      ui_print "  涉及分区: $META_DISCOVERED_PARTITIONS"
+      ui_print "  所有分区将自动挂载 (可在 WebUI 中排除)"
     else
       ui_print "  未发现需要挂载的模块"
     fi
@@ -309,13 +306,14 @@ if [ "$KSU" ] || [ "$APATCH" ]; then
   # INFO: Persist the configuration so metamount.sh can source it on next boot.
   # Config lives at /data/adb/.rz_meta_cfg (OUTSIDE /data/adb/rezygisk/) so it
   # survives post-fs-data.sh's rm -rf /data/adb/rezygisk and the chmod 555.
-  # include_modules and allow_partitions are auto-populated above.
+  # exclude_partitions is left empty = mount all partitions the included
+  # modules reference.
   mkdir -p /data/adb
   cat > /data/adb/.rz_meta_cfg <<METACFG
 enabled=$META_ENABLED
 mount_mode=$META_MOUNT_MODE
 fake_mount_name=$META_FAKE_NAME
-allow_partitions="$META_ALLOW_PARTITIONS"
+exclude_partitions=""
 include_modules="$META_INCLUDE_MODULES"
 METACFG
 fi
