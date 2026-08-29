@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../constants.h"
 #include "../utils.h"
 #include "common.h"
 

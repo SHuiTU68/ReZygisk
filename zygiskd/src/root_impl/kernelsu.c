@@ -8,6 +8,7 @@
 #include <sys/syscall.h>
 #include <sys/system_properties.h>
 
+#include "../constants.h"
 #include "../utils.h"
 #include "common.h"
 

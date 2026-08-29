@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/sysmacros.h>
 
 #include <unistd.h>
 
@@ -24,7 +25,6 @@
 
 #include "art_method.h"
 #include "cpp_strings.h"
-#include "registers.h"
 
 void *start_addr = NULL;
 size_t block_size = 0;
@@ -80,6 +80,11 @@ struct zygisk_context {
   size_t register_info_count;
   struct ignore_info ignore_info[MAX_IGNORE_INFO];
   size_t ignore_info_count;
+
+  /* INFO: NoHello capability-session token (syscall 244), opened in the
+              pre-specialize window so hidden module libraries can still be
+              unhidden/unmapped during post-specialize unload. 0 = no session. */
+  unsigned long long nh_session_token;
 };
 
 /* INFO: Current context */
@@ -515,10 +520,6 @@ static void initialize_jni_hook(void) {
 
   can_hook_jni = true;
   do_hook_zygote(env);
-
-  /* INFO: ART leaks through libc strings from ReZygisk. We immediately
-             clear them here. */
-  registers_clear();
 }
 
 /* INFO: Module registration and API functions */
@@ -1032,6 +1033,23 @@ static void rz_run_modules_post(struct zygisk_context *ctx) {
 
   if (zygisk_module_length > 0)
     LOGD("Modules unloaded: %zu/%zu", modules_unloaded, zygisk_module_length);
+
+  /* INFO: Close the session now that specialization is finalized. By this point
+              every syscall-244 operation is done: the hide/copy ran in the
+              pre-specialize window and the post-specialize unmaps ran in the loop
+              above; this close is the last 244 and is still exempt because the
+              session is active until it returns. A resident module needs NO open
+              session afterwards - its lib already lives in hidden memory and is
+              reclaimed kernel-side at mm teardown (free_pmd_range / exit_mmap hooks),
+              which do not consult the session. Holding it open for the whole process
+              life would leave syscall 244 seccomp-exempt for the app's entire runtime
+              (a sandbox-escape surface), so we re-lock it here unconditionally. Guarded
+              by the token, so it is a no-op for paths that never opened one (e.g.
+              system_server). */
+  if (ctx->nh_session_token != 0) {
+    csoloader_nohello_session_close(ctx->nh_session_token);
+    ctx->nh_session_token = 0;
+  }
 }
 
 static void rz_app_specialize_pre(struct zygisk_context *ctx) {
@@ -1078,6 +1096,22 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   }
 
   ctx->info_flags = rezygiskd_get_process_flags(uid, ctx->process);
+
+  /* INFO: Hide the module libraries into NoHello syscall-244 memory ONLY for
+              DenyListed apps - never the zygote, system_server, or non-DenyList
+              apps. We are still in the privileged pre-specialize (zygote-domain)
+              window, so syscall 244 is authorized and the modules (loaded once in
+              the zygote and inherited here) are hidden in place, before their
+              hooks run. A capability session is opened first so the post-specialize
+              unload (rz_run_modules_post) can still unmap the hidden memory after
+              the process drops to its app domain; it is closed there. */
+  if (zygisk_module_length > 0 && (ctx->info_flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST) {
+    ctx->nh_session_token = csoloader_nohello_session_open((uintptr_t)start_addr, (uintptr_t)start_addr + block_size);
+
+    for (size_t i = 0; i < zygisk_module_length; i++)
+      csoloader_hide(&zygisk_modules[i].lib);
+  }
+
   /* INFO: To ensure we are really using a clean mount namespace, we use
               the first process it as reference for clean mount namespace,
               before it even does something, so that it will be clean yet
@@ -1299,8 +1333,6 @@ static bool hook_register(const char *lib_name, const char *symbol, bool is_pref
 static bool hook_unregister(const char *lib_name, const char *symbol, bool is_prefix, void **backup) {
   if (!(is_prefix ? plti_remove_hook_by_prefix : plti_remove_hook)(&plti_ctx, lib_name, symbol, backup)) {
     LOGE("Failed to unregister plt_hook \"%s\" with PLTI", symbol);
-
-    should_unmap_zygisk = false;
 
     return false;
   }
