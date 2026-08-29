@@ -28,7 +28,8 @@ LOADER_INPUTS = common.mk loader/Makefile \
         $(shell find loader/src -type f | sort)
 
 ZYGISKD_INPUTS = common.mk zygiskd/Makefile \
-        $(shell find zygiskd/src -type f | sort)
+        zygiskd-rs/Cargo.toml zygiskd-rs/Cargo.lock zygiskd-rs/build.rs \
+        $(shell find zygiskd-rs/src -type f | sort)
 
 MODULE_INPUTS = scripts/sign.py \
         $(shell find module/src -type f | sort) \
