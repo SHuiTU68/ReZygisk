@@ -47,5 +47,5 @@ if [ -f "$hash_path" ]; then
   (echo "$(cat "$hash_path")  $file_path" | sha256sum -c -s -) || abort_verify "Failed to verify $file"
   ui_print "- Verified $file" >&1
 else
-  ui_print "- Download from Magisk app"
+  ui_print "- Download from APatch app"
 fi

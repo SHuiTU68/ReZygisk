@@ -12,24 +12,7 @@
 #include "apatch.h"
 
 void apatch_get_existence(struct root_impl_state *state) {
-  if (access("/data/adb/ap/bin/apd", F_OK) != 0) {
-    state->state = Inexistent;
-
-    return;
-  }
-
-  const char *PATH = getenv("PATH");
-  if (PATH == NULL) {
-    LOGE("Failed to get PATH environment variable");
-
-    state->state = Inexistent;
-
-    return;
-  }
-
-  if (strstr(PATH, "/data/adb/ap/bin") == NULL) {
-    LOGE("APatch's APD binary is not in PATH");
-
+  if (access("/data/adb/apd", F_OK) != 0) {
     state->state = Inexistent;
 
     return;
