@@ -285,20 +285,22 @@ void zygiskd_start(char *restrict argv[]) {
 
   unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ DAEMON_SET_INFO }, sizeof(uint8_t));
 
-  char impl_name[LONGEST_ROOT_IMPL_NAME];
-  stringify_root_impl_name(impl, impl_name);
+  {
+    char impl_name[LONGEST_ROOT_IMPL_NAME];
+    stringify_root_impl_name(impl, impl_name);
 
-  uint32_t root_impl_len = (uint32_t)strlen(impl_name);
-  unix_datagram_sendto(CONTROLLER_SOCKET, &root_impl_len, sizeof(root_impl_len));
-  unix_datagram_sendto(CONTROLLER_SOCKET, impl_name, root_impl_len);
+    uint32_t root_impl_len = (uint32_t)strlen(impl_name);
+    unix_datagram_sendto(CONTROLLER_SOCKET, &root_impl_len, sizeof(root_impl_len));
+    unix_datagram_sendto(CONTROLLER_SOCKET, impl_name, root_impl_len);
 
-  uint32_t modules_len = (uint32_t)context.len;
-  unix_datagram_sendto(CONTROLLER_SOCKET, &modules_len, sizeof(modules_len));
+    uint32_t modules_len = (uint32_t)context.len;
+    unix_datagram_sendto(CONTROLLER_SOCKET, &modules_len, sizeof(modules_len));
 
-  for (size_t i = 0; i < context.len; i++) {
-    uint32_t module_name_len = (uint32_t)strlen(context.modules[i].name);
-    unix_datagram_sendto(CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
-    unix_datagram_sendto(CONTROLLER_SOCKET, context.modules[i].name, module_name_len);
+    for (size_t i = 0; i < context.len; i++) {
+      uint32_t module_name_len = (uint32_t)strlen(context.modules[i].name);
+      unix_datagram_sendto(CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
+      unix_datagram_sendto(CONTROLLER_SOCKET, context.modules[i].name, module_name_len);
+    }
   }
 
   LOGI("Sent root implementation and modules information to controller socket");
