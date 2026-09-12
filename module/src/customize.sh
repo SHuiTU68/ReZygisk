@@ -10,41 +10,9 @@ done
 SKIPUNZIP=1
 
 DEBUG=@DEBUG@
-MIN_KSU_VERSION=@MIN_KSU_VERSION@
-MIN_KSUD_VERSION=@MIN_KSUD_VERSION@
 MIN_MAGISK_VERSION=@MIN_MAGISK_VERSION@
-MIN_APATCH_VERSION=@MIN_APATCH_VERSION@
 
-if [ "$BOOTMODE" ] && [ "$KSU" ]; then
-  ui_print "- Installing from KernelSU app"
-  ui_print "- KernelSU version: $KSU_KERNEL_VER_CODE (kernel) + $KSU_VER_CODE (ksud)"
-  if ! [ "$KSU_KERNEL_VER_CODE" ] || [ "$KSU_KERNEL_VER_CODE" -lt "$MIN_KSU_VERSION" ]; then
-    ui_print "*********************************************************"
-    ui_print "! KernelSU version is too old!"
-    ui_print "! Please update KernelSU to latest version"
-    abort    "*********************************************************"
-  fi
-  if ! [ "$KSU_VER_CODE" ] || [ "$KSU_VER_CODE" -lt "$MIN_KSUD_VERSION" ]; then
-    ui_print "*********************************************************"
-    ui_print "! ksud version is too old!"
-    ui_print "! Please update KernelSU Manager to latest version"
-    abort    "*********************************************************"
-  fi
-  if [ "$(which magisk)" ]; then
-    ui_print "*********************************************************"
-    ui_print "! Multiple root implementation is NOT supported!"
-    ui_print "! Please uninstall Magisk before installing ReZygisk"
-    abort    "*********************************************************"
-  fi
-  elif [ "$BOOTMODE" ] && [ "$APATCH" ]; then
-    ui_print "- Installing from APatch app"
-    if ! [ "$APATCH_VER_CODE" ] || [ "$APATCH_VER_CODE" -lt "$MIN_APATCH_VERSION" ]; then
-      ui_print "*********************************************************"
-      ui_print "! APatch version is too old!"
-      ui_print "! Please update APatch to latest version"
-      abort    "*********************************************************"
-    fi
-elif [ "$BOOTMODE" ] && [ "$MAGISK_VER_CODE" ]; then
+if [ "$BOOTMODE" ] && [ "$MAGISK_VER_CODE" ]; then
   ui_print "- Installing from Magisk app"
   if [ "$MAGISK_VER_CODE" -lt "$MIN_MAGISK_VERSION" ]; then
     ui_print "*********************************************************"
@@ -55,7 +23,7 @@ elif [ "$BOOTMODE" ] && [ "$MAGISK_VER_CODE" ]; then
 else
   ui_print "*********************************************************"
   ui_print "! Install from recovery is not supported"
-  ui_print "! Please install from KernelSU or Magisk app"
+  ui_print "! Please install from Magisk app"
   abort    "*********************************************************"
 fi
 
@@ -90,34 +58,12 @@ extract "$ZIPFILE" 'customize.sh'  "$TMPDIR/.vunzip"
 extract "$ZIPFILE" 'verify.sh'     "$TMPDIR/.vunzip"
 extract "$ZIPFILE" 'sepolicy.rule' "$TMPDIR"
 
-if [ "$KSU" ]; then
-  ui_print "- Checking SELinux patches"
-  if ! check_sepolicy "$TMPDIR/sepolicy.rule"; then
-    ui_print "*********************************************************"
-    ui_print "! Unable to apply SELinux patches!"
-    ui_print "! Your kernel may not support SELinux patch fully"
-    abort    "*********************************************************"
-  fi
-fi
-
 ui_print "- Extracting module files"
 extract "$ZIPFILE" 'module.prop'     "$MODPATH"
 extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"
 extract "$ZIPFILE" 'service.sh'      "$MODPATH"
 extract "$ZIPFILE" 'uninstall.sh'    "$MODPATH"
 extract "$ZIPFILE" 'rezygisk.sh' "/data/adb/post-fs-data.d/"
-
-# INFO: KernelSU 2.x.x and below runs post-fs-data.d before mounting
-#         the modules. This disallows us to clean our own module.prop.
-#         To work around this, we utilize post-mount.d which runs after
-#         mounting, and copy our post-fs-data.d script there.
-#
-# SOURCES:
-#  - https://github.com/tiann/KernelSU/blob/6615068a987a12bbc6a3ad272b285cec7f594964/userspace/ksud/src/init_event.rs#L123
-#  - https://github.com/tiann/KernelSU/blob/6615068a987a12bbc6a3ad272b285cec7f594964/userspace/ksud/src/init_event.rs#L161
-#  - https://github.com/tiann/KernelSU/blob/6615068a987a12bbc6a3ad272b285cec7f594964/userspace/ksud/src/init_event.rs#L212-L217
-mkdir -p /data/adb/post-mount.d
-cp "/data/adb/post-fs-data.d/rezygisk.sh" "/data/adb/post-mount.d/rezygisk.sh"
 
 cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
 

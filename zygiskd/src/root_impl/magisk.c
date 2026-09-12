@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +26,58 @@ static const char *magisk_manager_paths[] = {
   "/data/user_de/0/com.topjohnwu.magisk",
   "/data/user_de/0/io.github.vvb2060.magisk"
 };
+
+/* INFO: Magisk stores its policies and denylist in a SQLite database.
+           Querying it requires spawning the magisk binary, so the results
+           are cached in-memory and are only invalidated when the database
+           file itself changes (checked through its modification timestamp,
+           size and inode). */
+#define MAGISK_DB_PATH "/data/adb/magisk.db"
+#define MAGISK_CACHE_SIZE (32u)
+
+struct magisk_granted_entry {
+  uid_t uid;
+  bool granted;
+  bool valid;
+};
+
+struct magisk_umount_entry {
+  char process[PROCESS_NAME_MAX_LEN];
+  bool umount;
+  bool valid;
+};
+
+static struct stat magisk_db_stat;
+static bool magisk_db_stat_valid = false;
+
+static struct magisk_granted_entry magisk_granted_cache[MAGISK_CACHE_SIZE];
+static struct magisk_umount_entry magisk_umount_cache[MAGISK_CACHE_SIZE];
+
+static size_t magisk_granted_cache_next = 0;
+static size_t magisk_umount_cache_next = 0;
+
+/* INFO: Returns whether the database changed since the last check, dropping
+           every cached entry in that case. When the database cannot be
+           stat'ed, the cache is bypassed altogether. */
+static bool magisk_db_changed(void) {
+  struct stat st;
+  if (stat(MAGISK_DB_PATH, &st) == -1) return true;
+
+  if (magisk_db_stat_valid &&
+      st.st_mtim.tv_sec == magisk_db_stat.st_mtim.tv_sec &&
+      st.st_mtim.tv_nsec == magisk_db_stat.st_mtim.tv_nsec &&
+      st.st_size == magisk_db_stat.st_size &&
+      st.st_ino == magisk_db_stat.st_ino)
+    return false;
+
+  magisk_db_stat = st;
+  magisk_db_stat_valid = true;
+
+  memset(magisk_granted_cache, 0, sizeof(magisk_granted_cache));
+  memset(magisk_umount_cache, 0, sizeof(magisk_umount_cache));
+
+  return true;
+}
 
 void magisk_get_existence(struct root_impl_state *state) {
   const char *magisk_files[] = {
@@ -70,6 +123,17 @@ void magisk_get_existence(struct root_impl_state *state) {
 }
 
 bool magisk_uid_granted_root(uid_t uid) {
+  bool changed = magisk_db_changed();
+
+  if (!changed) {
+    for (size_t i = 0; i < MAGISK_CACHE_SIZE; i++) {
+      if (!magisk_granted_cache[i].valid) continue;
+      if (magisk_granted_cache[i].uid != uid) continue;
+
+      return magisk_granted_cache[i].granted;
+    }
+  }
+
   char sqlite_cmd[256];
   snprintf(sqlite_cmd, sizeof(sqlite_cmd), "select 1 from policies where uid=%d and policy=2 limit 1", uid);
 
@@ -82,10 +146,28 @@ bool magisk_uid_granted_root(uid_t uid) {
     return false;
   }
 
-  return result[0] != '\0';
+  bool granted = result[0] != '\0';
+
+  struct magisk_granted_entry *entry = &magisk_granted_cache[magisk_granted_cache_next++ % MAGISK_CACHE_SIZE];
+  entry->uid = uid;
+  entry->granted = granted;
+  entry->valid = true;
+
+  return granted;
 }
 
 bool magisk_uid_should_umount(const char *const process) {
+  bool changed = magisk_db_changed();
+
+  if (!changed) {
+    for (size_t i = 0; i < MAGISK_CACHE_SIZE; i++) {
+      if (!magisk_umount_cache[i].valid) continue;
+      if (strcmp(magisk_umount_cache[i].process, process) != 0) continue;
+
+      return magisk_umount_cache[i].umount;
+    }
+  }
+
   /* INFO: PROCESS_NAME_MAX_LEN already has a +1 for NULL */
   char sqlite_cmd[59 + PROCESS_NAME_MAX_LEN];
   /* INFO: Find if process string starts with any data in "process" column */
@@ -100,7 +182,14 @@ bool magisk_uid_should_umount(const char *const process) {
     return false;
   }
 
-  return result[0] != '\0';
+  bool umount = result[0] != '\0';
+
+  struct magisk_umount_entry *entry = &magisk_umount_cache[magisk_umount_cache_next++ % MAGISK_CACHE_SIZE];
+  snprintf(entry->process, sizeof(entry->process), "%s", process);
+  entry->umount = umount;
+  entry->valid = true;
+
+  return umount;
 }
 
 bool magisk_uid_is_manager(uid_t uid) {

@@ -72,16 +72,6 @@ int main(int argc, char **argv) {
 
         break;
       }
-      case ROOT_IMPL_APATCH: {
-        printf("Root implementation: APatch\n");
-
-        break;
-      }
-      case ROOT_IMPL_KERNELSU: {
-        printf("Root implementation: KernelSU\n");
-
-        break;
-      }
       case ROOT_IMPL_MAGISK: {
         printf("Root implementation: Magisk\n");
 

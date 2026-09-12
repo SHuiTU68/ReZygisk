@@ -24,8 +24,6 @@ struct zygisk_modules {
 
 enum root_impl {
   ROOT_IMPL_NONE,
-  ROOT_IMPL_APATCH,
-  ROOT_IMPL_KERNELSU,
   ROOT_IMPL_MAGISK
 };
 

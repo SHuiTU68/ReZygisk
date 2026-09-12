@@ -3,7 +3,7 @@ const developmentResponse = {
     errno: 0,
     stdout: `
       {
-        "root": "KernelSU",
+        "root": "Magisk",
         "monitor": {
           "state": "0"
         },

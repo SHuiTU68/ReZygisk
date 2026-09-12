@@ -30,7 +30,6 @@ struct Context {
 #define TMP_PATH "/data/adb/rezygisk"
 #define CONTROLLER_SOCKET TMP_PATH "/init_monitor"
 #define PATH_CP_NAME TMP_PATH "/" LP_SELECT("cp32.sock", "cp64.sock")
-#define ZYGISKD_FILE PATH_MODULES_DIR "/rezygisk/bin/zygiskd" LP_SELECT("32", "64")
 #define ZYGISKD_PATH "/data/adb/modules/rezygisk/bin/zygiskd" LP_SELECT("32", "64")
 
 #ifdef __aarch64__
@@ -43,7 +42,6 @@ struct Context {
   #define ARCH_STR "x86"
 #else
   #error "Unsupported architecture"
-  #define ARCH_STR "unknown"
 #endif
 
 /* WARNING: Dynamic memory based */
@@ -259,19 +257,17 @@ static int spawn_companion(char *restrict argv[], char *restrict name, int lib_f
 
 /* WARNING: Dynamic memory based */
 void zygiskd_start(char *restrict argv[]) {
-  /* INFO: When implementation is None or Multiple, it won't set the values
-            for the context, causing it to have garbage values. In response
+  /* INFO: When the implementation is None, it won't set the values for
+            the context, causing it to have garbage values. In response
             to that, "= { 0 }" is used to ensure that the values are clean. */
   struct Context context = { 0 };
 
   struct root_impl impl;
   get_impl(&impl);
-  if (impl.impl == None || impl.impl == Multiple) {
+  if (impl.impl == None) {
     unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ DAEMON_SET_ERROR_INFO }, sizeof(uint8_t));
 
-    const char *msg = NULL;
-    if (impl.impl == None) msg = "Unsupported environment: Unknown root implementation";
-    else msg = "Unsupported environment: Multiple root implementations found";
+    const char *msg = "Unsupported environment: Magisk not found";
 
     LOGE("%s", msg);
 
@@ -309,8 +305,6 @@ void zygiskd_start(char *restrict argv[]) {
     LOGE("Failed creating daemon socket");
 
     free_modules(&context);
-
-    root_impl_cleanup();
 
     return;
   }
@@ -393,25 +387,7 @@ void zygiskd_start(char *restrict argv[]) {
           }
         }
 
-        switch (impl.impl) {
-          case None: { break; }
-          case Multiple: { break; }
-          case KernelSU: {
-            flags |= PROCESS_ROOT_IS_KSU;
-
-            break;
-          }
-          case APatch: {
-            flags |= PROCESS_ROOT_IS_APATCH;
-
-            break;
-          }
-          case Magisk: {
-            flags |= PROCESS_ROOT_IS_MAGISK;
-
-            break;
-          }
-        }
+        flags |= PROCESS_ROOT_IS_MAGISK;
 
         ret = write_uint32_t(client_fd, flags);
         ASSURE_SIZE_WRITE("GetProcessFlags", "flags", ret, sizeof(flags), break);
@@ -421,25 +397,7 @@ void zygiskd_start(char *restrict argv[]) {
       case GetInfo: {
         uint32_t flags = 0;
 
-        switch (impl.impl) {
-          case None: { break; }
-          case Multiple: { break; }
-          case KernelSU: {
-            flags |= PROCESS_ROOT_IS_KSU;
-
-            break;
-          }
-          case APatch: {
-            flags |= PROCESS_ROOT_IS_APATCH;
-
-            break;
-          }
-          case Magisk: {
-            flags |= PROCESS_ROOT_IS_MAGISK;
-
-            break;
-          }
-        }
+        flags |= PROCESS_ROOT_IS_MAGISK;
 
         ssize_t ret = write_uint32_t(client_fd, flags);
         ASSURE_SIZE_WRITE("GetInfo", "flags", ret, sizeof(flags), break);
@@ -595,9 +553,9 @@ void zygiskd_start(char *restrict argv[]) {
         ASSURE_SIZE_WRITE("UpdateMountNamespace", "our_pid", ret, sizeof(our_pid), break);
 
         if ((enum MountNamespaceState)mns_state == Clean)
-          save_mns_fd(pid, Mounted, impl);
+          save_mns_fd(pid, Mounted);
 
-        int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state, impl);
+        int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state);
         if (ns_fd == -1) {
           LOGE("Failed to save mount namespace fd for pid %d: %s", pid, strerror(errno));
 
@@ -655,5 +613,4 @@ void zygiskd_start(char *restrict argv[]) {
 
   close(socket_fd);
   free_modules(&context);
-  root_impl_cleanup();
 }
