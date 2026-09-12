@@ -19,6 +19,7 @@
 
 #include "root_impl/common.h"
 #include "root_impl/kernelsu.h"
+#include "root_impl/magisk.h"
 
 #include "utils.h"
 
@@ -475,7 +476,8 @@ void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
       break;
     }
     case Magisk: {
-      strcpy(output, "Magisk");
+      if (impl.variant == MOfficial) strcpy(output, "Magisk");
+      else strcpy(output, "Magisk Alpha");
 
       break;
     }

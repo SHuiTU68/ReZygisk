@@ -18,6 +18,14 @@
 /* INFO: Longest path */
 static char path_to_magisk[sizeof(DEBUG_RAMDISK_MAGISK)] = { 0 };
 
+/* INFO: Data directories of the manager application, indexed by Magisk
+           variant: the official Magisk uses "com.topjohnwu.magisk", while
+           the Alpha branch (vvb2060) uses "io.github.vvb2060.magisk". */
+static const char *magisk_manager_paths[] = {
+  "/data/user_de/0/com.topjohnwu.magisk",
+  "/data/user_de/0/io.github.vvb2060.magisk"
+};
+
 void magisk_get_existence(struct root_impl_state *state) {
   const char *magisk_files[] = {
     SBIN_MAGISK,
@@ -25,6 +33,12 @@ void magisk_get_existence(struct root_impl_state *state) {
     DEBUG_RAMDISK_MAGISK,
     BITLESS_DEBUG_RAMDISK_MAGISK
   };
+
+  /* INFO: Both Magisk variants share the same binaries and database, differing
+             only in the manager package name, so the existence of the manager
+             data directory is used to tell them apart. */
+  state->variant = MOfficial;
+  if (access(magisk_manager_paths[MAlpha], F_OK) == 0) state->variant = MAlpha;
 
   for (size_t i = 0; i < sizeof(magisk_files) / sizeof(magisk_files[0]); i++) {
     if (access(magisk_files[i], F_OK) != 0) continue;
@@ -95,22 +109,25 @@ bool magisk_uid_is_manager(uid_t uid) {
   char output[128];
   if (!exec_command(output, sizeof(output), (const char *)path_to_magisk, argv)) {
     LOGE("Failed to execute magisk binary: %s", strerror(errno));
-
-    return false;
-  }
-
-  char stat_path[PATH_MAX] = "/data/user_de/0/com.topjohnwu.magisk";
-  if (output[0] != '\0')
+  } else if (output[0] != '\0') {
+    /* INFO: The sqlite wrapper outputs "value=<requester>", where <requester>
+               is the package name of the manager application. */
+    char stat_path[PATH_MAX];
     snprintf(stat_path, sizeof(stat_path), "/data/user_de/0/%s", output + strlen("value="));
 
-  struct stat st;
-  if (stat(stat_path, &st) == -1) {
-    if (errno != ENOENT) {
-      LOGE("Failed to stat %s: %s", stat_path, strerror(errno));
-    }
-
-    return false;
+    struct stat st;
+    if (stat(stat_path, &st) == 0 && st.st_uid == uid) return true;
   }
 
-  return st.st_uid == uid;
+  /* INFO: The requester string may be unset, outdated or refer to a manager of
+             another Magisk variant, so fall back to checking the known manager
+             data directories of all supported variants. */
+  for (size_t i = 0; i < sizeof(magisk_manager_paths) / sizeof(magisk_manager_paths[0]); i++) {
+    struct stat st;
+    if (stat(magisk_manager_paths[i], &st) == -1) continue;
+
+    if (st.st_uid == uid) return true;
+  }
+
+  return false;
 }

@@ -55,7 +55,7 @@ void root_impls_setup(void) {
       break;
     }
     case Magisk: {
-      LOGI("Magisk root implementation found.\n");
+      LOGI("Magisk%s root implementation found.\n", impl.variant == MAlpha ? " Alpha" : "");
 
       break;
     }
