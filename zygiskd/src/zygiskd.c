@@ -382,7 +382,7 @@ void zygiskd_start(char *restrict argv[]) {
           if (uid_granted_root(uid)) {
             flags |= PROCESS_GRANTED_ROOT;
           }
-          if (uid_should_umount(uid, (const char *const)process)) {
+          if (uid_should_umount((const char *const)process)) {
             flags |= PROCESS_ON_DENYLIST;
           }
         }
