@@ -9,7 +9,7 @@ OBJ_DIR = $(OBJ_ROOT)/$(ARCH)
 ZKSU_VERSION ?= $(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE)
 
 ifeq ($(BUILD_TYPE),release)
-	TYPE_CFLAGS = -O3 -ffast-math -flto -Wno-unused -Wno-unused-parameter       \
+	TYPE_CFLAGS = -O3 -ffast-math -flto -funroll-loops -Wno-unused -Wno-unused-parameter       \
 				  -fvisibility=hidden -fvisibility-inlines-hidden -fno-unwind-tables \
 				  -fno-asynchronous-unwind-tables -DNDEBUG
 	TYPE_LDFLAGS = -Wl,--exclude-libs,ALL -Wl,--strip-all -flto

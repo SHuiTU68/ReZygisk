@@ -9,7 +9,7 @@ OBJ_DIR = $(OBJ_ROOT)/$(ARCH)
 ZKSU_VERSION ?= $(VER_NAME)
 
 ifeq ($(BUILD_TYPE),release)
-	TYPE_CFLAGS = -O3 -ffast-math -flto
+	TYPE_CFLAGS = -O3 -ffast-math -flto -funroll-loops -fomit-frame-pointer -fstack-protector-strong
 	TYPE_LDFLAGS = -Wl,--strip-all -flto
 else
 	TYPE_CFLAGS = -g -O0 -DDEBUG

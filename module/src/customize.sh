@@ -1,3 +1,11 @@
+# Disable other Zygisk implementations, as they conflict with ReZygisk
+modules="
+zygisksu
+"
+for i in ${modules}; do
+	[[ -e "/data/adb/modules/${i}" ]] && touch "/data/adb/modules/${i}/disable"
+done
+
 # shellcheck disable=SC2034
 SKIPUNZIP=1
 

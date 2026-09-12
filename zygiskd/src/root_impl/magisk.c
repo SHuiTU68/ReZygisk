@@ -104,30 +104,43 @@ bool magisk_uid_should_umount(const char *const process) {
 }
 
 bool magisk_uid_is_manager(uid_t uid) {
-  const char *const argv[] = { "magisk", "--sqlite", "select value from strings where key=\"requester\" limit 1", NULL };
+  bool known_manager_found = false;
 
-  char output[128];
-  if (!exec_command(output, sizeof(output), (const char *)path_to_magisk, argv)) {
-    LOGE("Failed to execute magisk binary: %s", strerror(errno));
-  } else if (output[0] != '\0') {
-    /* INFO: The sqlite wrapper outputs "value=<requester>", where <requester>
-               is the package name of the manager application. */
-    char stat_path[PATH_MAX];
-    snprintf(stat_path, sizeof(stat_path), "/data/user_de/0/%s", output + strlen("value="));
-
-    struct stat st;
-    if (stat(stat_path, &st) == 0 && st.st_uid == uid) return true;
-  }
-
-  /* INFO: The requester string may be unset, outdated or refer to a manager of
-             another Magisk variant, so fall back to checking the known manager
-             data directories of all supported variants. */
+  /* INFO: The known manager data directories are probed first, as they cover
+             the vast majority of devices, avoiding the expensive execution
+             of the magisk binary. */
   for (size_t i = 0; i < sizeof(magisk_manager_paths) / sizeof(magisk_manager_paths[0]); i++) {
     struct stat st;
     if (stat(magisk_manager_paths[i], &st) == -1) continue;
 
     if (st.st_uid == uid) return true;
+
+    known_manager_found = true;
   }
 
-  return false;
+  /* INFO: When a known manager exists, the manager is necessarily one of
+             them, so the UID belongs to something else. */
+  if (known_manager_found) return false;
+
+  /* INFO: Otherwise, the manager may use a spoofed or custom package name,
+             so fall back to the requester string stored in the Magisk
+             database. */
+  const char *const argv[] = { "magisk", "--sqlite", "select value from strings where key=\"requester\" limit 1", NULL };
+
+  char output[128];
+  if (!exec_command(output, sizeof(output), (const char *)path_to_magisk, argv)) {
+    LOGE("Failed to execute magisk binary: %s", strerror(errno));
+
+    return false;
+  }
+
+  if (output[0] == '\0') return false;
+
+  /* INFO: The sqlite wrapper outputs "value=<requester>", where <requester>
+             is the package name of the manager application. */
+  char stat_path[PATH_MAX];
+  snprintf(stat_path, sizeof(stat_path), "/data/user_de/0/%s", output + strlen("value="));
+
+  struct stat st;
+  return stat(stat_path, &st) == 0 && st.st_uid == uid;
 }
