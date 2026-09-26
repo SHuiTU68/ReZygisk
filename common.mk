@@ -13,7 +13,7 @@ COMMIT_HASH ?= $(shell git -C "$(ROOT_DIR)" rev-parse --verify --short HEAD 2>/d
 MIN_APATCH_VERSION ?= 10655
 
 MODULE_ID ?= rezygisk
-MODULE_NAME ?= APReZygisk
+MODULE_NAME ?= ReZygisk
 
 NDK_VERSION ?= 29.0.13113456
 ANDROID_HOME ?= $(HOME)/Android/Sdk
