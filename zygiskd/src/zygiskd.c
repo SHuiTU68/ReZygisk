@@ -271,28 +271,11 @@ static int spawn_companion(char *restrict argv[], char *restrict name, int lib_f
 
 /* WARNING: Dynamic memory based */
 void zygiskd_start(char *restrict argv[]) {
-  /* INFO: When implementation is None or Multiple, it won't set the values
-            for the context, causing it to have garbage values. In response
-            to that, "= { 0 }" is used to ensure that the values are clean. */
   struct Context context = { 0 };
 
   struct root_impl impl;
   get_impl(&impl);
-  if (impl.impl == None || impl.impl == Multiple) {
-    unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ DAEMON_SET_ERROR_INFO }, sizeof(uint8_t));
-
-    const char *msg = NULL;
-    if (impl.impl == None) msg = "Unsupported environment: Unknown root implementation";
-    else msg = "Unsupported environment: Multiple root implementations found";
-
-    LOGE("%s", msg);
-
-    uint32_t msg_len = (uint32_t)strlen(msg);
-    unix_datagram_sendto(CONTROLLER_SOCKET, &msg_len, sizeof(msg_len));
-    unix_datagram_sendto(CONTROLLER_SOCKET, msg, msg_len);
-
-    exit(EXIT_FAILURE);
-  } else {
+  {
     load_modules(&context);
 
     unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ DAEMON_SET_INFO }, sizeof(uint8_t));
@@ -378,7 +361,7 @@ void zygiskd_start(char *restrict argv[]) {
         ssize_t ret = read_uint32_t(client_fd, &uid);
         ASSURE_SIZE_READ("GetProcessFlags", "uid", ret, sizeof(uid), break);
 
-        /* INFO: Only used for Magisk, as it saves process names and not UIDs. */
+        /* INFO: APatch matches isolated services by process name too. */
         char process[PROCESS_NAME_MAX_LEN];
         ret = read_string(client_fd, process, sizeof(process));
         if (ret == -1) {
@@ -406,20 +389,8 @@ void zygiskd_start(char *restrict argv[]) {
         }
 
         switch (impl.impl) {
-          case None: { break; }
-          case Multiple: { break; }
-          case KernelSU: {
-            flags |= PROCESS_ROOT_IS_KSU;
-
-            break;
-          }
           case APatch: {
             flags |= PROCESS_ROOT_IS_APATCH;
-
-            break;
-          }
-          case Magisk: {
-            flags |= PROCESS_ROOT_IS_MAGISK;
 
             break;
           }
@@ -434,20 +405,8 @@ void zygiskd_start(char *restrict argv[]) {
         uint32_t flags = 0;
 
         switch (impl.impl) {
-          case None: { break; }
-          case Multiple: { break; }
-          case KernelSU: {
-            flags |= PROCESS_ROOT_IS_KSU;
-
-            break;
-          }
           case APatch: {
             flags |= PROCESS_ROOT_IS_APATCH;
-
-            break;
-          }
-          case Magisk: {
-            flags |= PROCESS_ROOT_IS_MAGISK;
 
             break;
           }
@@ -607,9 +566,9 @@ void zygiskd_start(char *restrict argv[]) {
         ASSURE_SIZE_WRITE("UpdateMountNamespace", "our_pid", ret, sizeof(our_pid), break);
 
         if ((enum MountNamespaceState)mns_state == Clean)
-          save_mns_fd(pid, Mounted, impl);
+          save_mns_fd(pid, Mounted);
 
-        int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state, impl);
+        int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state);
         if (ns_fd == -1) {
           LOGE("Failed to save mount namespace fd for pid %d: %s", pid, strerror(errno));
 

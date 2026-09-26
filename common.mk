@@ -8,13 +8,12 @@ VER_NAME ?= v1.0.0
 VER_CODE ?= $(shell git -C "$(ROOT_DIR)" rev-list HEAD --count 2>/dev/null || echo 1)
 COMMIT_HASH ?= $(shell git -C "$(ROOT_DIR)" rev-parse --verify --short HEAD 2>/dev/null || echo unknown)
 
+# INFO: APatch-only fork: KernelSU and Magisk support has been dropped,
+#         so only APatch (apd) is required at build/runtime.
 MIN_APATCH_VERSION ?= 10655
-MIN_KSU_VERSION ?= 10940
-MIN_KSUD_VERSION ?= 11425
-MIN_MAGISK_VERSION ?= 26402
 
 MODULE_ID ?= rezygisk
-MODULE_NAME ?= ReZygisk
+MODULE_NAME ?= APReZygisk
 
 NDK_VERSION ?= 29.0.13113456
 ANDROID_HOME ?= $(HOME)/Android/Sdk
@@ -43,4 +42,4 @@ CC_ARCH = $(CC) --target=$(TARGET_$(ARCH)) --sysroot=$(SYSROOT)
 
 NDK_CFLAGS = -DANDROID -fdata-sections -ffunction-sections -funwind-tables \
 	-fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 \
-	-Wformat -Werror=format-security
+	-Wformat -Werror=format-security -funroll-loops -fomit-frame-pointer
